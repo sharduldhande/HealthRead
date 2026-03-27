@@ -1,0 +1,6 @@
+HealthRead/Models/mobileclip_s0.pt
+HealthRead/Models/mobileclip_s0_text.mlpackage/
+.DS_Store
+*.xcodeproj/xcuserdata
+*.xcworkspace/xcuserdata
+
