@@ -82,7 +82,9 @@ In future,  would like to replace with on-device Apple Foundation Models once Ap
 **Requirements:** Xcode 15+, iOS 17.2+ device, Gemini API key
 
 1. Clone the repo and open `HealthRead.xcodeproj`
-2. Download the MobileCLIP-S0 CoreML models from [Hugging Face](https://huggingface.co/apple/coreml-mobileclip) and place them in `HealthRead/Models/`
+2. Download the MobileCLIP-S0 CoreML models from [Hugging Face]([https://huggingface.co/apple/coreml-mobileclip](https://huggingface.co/apple/coreml-mobileclip/tree/main)) and place them in `HealthRead/Models/` : 
+   - mobileclip_s0_text.mlpackage
+   - mobileclip_s0_image.mlpackage
 3. Add your Gemini API key to either:
    - Create `Build.xcconfig` with `GEMINI_API_KEY = your_key_here`, or
    - Add a `Secrets.plist` with key `GeminiAPIKey`
