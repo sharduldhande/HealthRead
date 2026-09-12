@@ -4,3 +4,4 @@ HealthRead/Models/mobileclip_s0_text.mlpackage/
 *.xcodeproj/xcuserdata
 *.xcworkspace/xcuserdata
 
+HealthRead/Secrets.plist

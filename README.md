@@ -21,9 +21,9 @@
 
 ## Overview
 
-Point your iPhone camera at a blood pressure monitor or weight scale. MobileCLIP-S0 runs entirely on-device at **2.1 ms per frame**, detecting the device type in real time with zero-shot image–text cosine similarity. Once confident, a single JPEG is sent to a off-device Gemini model which returns structured readings (systolic, diastolic, pulse, or weight) via a typed JSON schema. The reading is then saved directly to **Apple Health**, so no third-party servers store your health data.
+Point your iPhone camera at a blood pressure monitor or weight scale. MobileCLIP-S0 runs entirely on-device at **2.1 ms per frame**, detecting the device type in real time with zero-shot image–text cosine similarity. Once confident, a single JPEG is sent to an off-device Gemini model which returns structured readings (systolic, diastolic, pulse, or weight) via a typed JSON schema. The reading is then saved directly to **Apple Health**, so no third-party servers store your health data.
 
-The app can also use on-device VNRecognizeTextRequest for OCR for total privacy, however that model is often inaccuarate and poorly optmised for reading seven segment displays.
+The app can also use on-device VNRecognizeTextRequest for OCR for total privacy, however that model is often inaccurate and poorly optimised for reading seven segment displays.
 
 In future, would like to replace with on-device Apple Foundation Models once Apple unrestricts vision input.
 
@@ -50,7 +50,7 @@ In future, would like to replace with on-device Apple Foundation Models once App
 
 Currently configured to use an off-device Gemini model for OCR.
 
-However, we can use on-device `VNRecognizeTextRequest` for OCR, however this is often inaccuarate and poorly optmised for reading seven segment displays.
+However, we can use on-device `VNRecognizeTextRequest` for OCR, however this is often inaccurate and poorly optimised for reading seven segment displays.
 
 In future,  would like to replace with on-device Apple Foundation Models once Apple unrestricts vision input.
 
@@ -82,12 +82,12 @@ In future,  would like to replace with on-device Apple Foundation Models once Ap
 **Requirements:** Xcode 15+, iOS 17.2+ device, Gemini API key
 
 1. Clone the repo and open `HealthRead.xcodeproj`
-2. Download the MobileCLIP-S0 CoreML models from [Hugging Face]([https://huggingface.co/apple/coreml-mobileclip](https://huggingface.co/apple/coreml-mobileclip/tree/main)) and place them in `HealthRead/Models/` : 
+2. Download the MobileCLIP-S0 CoreML models from [Hugging Face](https://huggingface.co/apple/coreml-mobileclip/tree/main) and place them in `HealthRead/Models/` : 
    - `mobileclip_s0_text.mlpackage`
    - `mobileclip_s0_image.mlpackage`
 3. Add your Gemini API key to either:
    - Create `Build.xcconfig` with `GEMINI_API_KEY = your_key_here`, or
-   - Add a `Secrets.plist` with key `GeminiAPIKey`
+   - Copy `Secrets.example.plist` to `HealthRead/Secrets.plist` and fill in `GeminiAPIKey`
 4. Build and run on a physical device (HealthKit and camera require real hardware)
 
 ---
