@@ -171,8 +171,8 @@ struct ClaudeReader {
 
     /// Public HTTPS endpoint of the reading service (an AWS Lambda function URL).
     /// Not a secret: it only accepts a photo and returns the reading JSON.
-    /// Filled in after the function is deployed; nil means cloud reading is off in this build.
-    static let serviceURL: URL? = nil
+    /// AWS Lambda function URL from server/reading-service (us-east-2). nil turns cloud reading off.
+    static let serviceURL = URL(string: "https://hiwf6xedh2z2jwuhsyx7t5rm5e0sqbwv.lambda-url.us-east-2.on.aws/")
 
     static var isConfigured: Bool { serviceURL != nil }
 

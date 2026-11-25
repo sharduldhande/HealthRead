@@ -55,7 +55,7 @@ READING_SCHEMA = {
         "diastolic": {"type": ["integer", "null"]},
         "pulse": {"type": ["integer", "null"]},
         "weight_value": {"type": ["number", "null"]},
-        "weight_unit": {"type": ["string", "null"], "enum": ["kg", "lbs", None]},
+        "weight_unit": {"anyOf": [{"type": "string", "enum": ["kg", "lbs"]}, {"type": "null"}]},
     },
     "required": ["device_type", "systolic", "diastolic", "pulse", "weight_value", "weight_unit"],
     "additionalProperties": False,
@@ -186,7 +186,7 @@ def handler(event, context):
     except anthropic.RateLimitError:
         return _reply(429, {"error": "Busy. Try again shortly."})
     except anthropic.APIStatusError as e:
-        print(json.dumps({"event": "anthropic_error", "status": e.status_code}))
+        print(json.dumps({"event": "anthropic_error", "status": e.status_code, "message": str(e.message)[:500]}))
         return _reply(502, {"error": "Reader unavailable."})
     except anthropic.APIConnectionError:
         print(json.dumps({"event": "anthropic_connection_error"}))
