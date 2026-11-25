@@ -9,15 +9,24 @@ https://api.anthropic.com), and the Anthropic SDK trades it for a short-lived ac
 token under a federation rule in the Claude Console. The iOS app holds no key either.
 Photos are not stored or logged: only token counts and timing are logged.
 
-Request:  POST {"image_jpeg_base64": "<base64 JPEG>"}
-Response: 200 {"device_type": "blood_pressure" | "weight_scale" | "none",
-               "systolic": int|null, "diastolic": int|null, "pulse": int|null,
-               "weight_value": number|null, "weight_unit": "kg"|"lbs"|null}
-          4xx/5xx {"error": "<short reason>"}
+Only genuine HealthRead installs can use it (Apple App Attest), and use is capped per
+device and per day (DynamoDB counters), so the Claude bill can't be run up by strangers.
+
+Endpoints (all POST):
+  /challenge  -> {"challenge": "<base64>"}              one-time value for /attest
+  /attest     {"key_id", "attestation", "challenge"}     registers an App Attest key
+  /read       {"image_jpeg_base64": "<base64 JPEG>"}     headers X-AppAttest-Key-Id and
+              X-AppAttest-Assertion (assertion over SHA256 of the exact request body)
+     200 {"device_type": "blood_pressure" | "weight_scale" | "none",
+          "systolic": int|null, "diastolic": int|null, "pulse": int|null,
+          "weight_value": number|null, "weight_unit": "kg"|"lbs"|null}
+     401 {"error": "attest_required"}   the app should attest (again) and retry once
+     429 {"error": "limit", "limit": "device" | "global"}
 """
 
 import base64
 import binascii
+import hmac
 import json
 import os
 import time
@@ -26,10 +35,23 @@ import anthropic
 import boto3
 from anthropic.lib.credentials import WorkloadIdentityCredentials
 
+import analytics
+import store
+from appattest import AttestationError, verify_assertion, verify_attestation
+
 MODEL = os.environ.get("MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("EFFORT", "low")
 ANTHROPIC_AUDIENCE = "https://api.anthropic.com"
 MAX_IMAGE_BYTES = 1_500_000  # the app sends about 100-400 KB
+APP_ID = os.environ.get("APP_ID", "")  # "<TEAM ID>.<bundle ID>"
+ALLOW_DEVELOPMENT_KEYS = os.environ.get("ALLOW_DEVELOPMENT_KEYS", "true") == "true"
+PER_DEVICE_DAILY_LIMIT = int(os.environ.get("PER_DEVICE_DAILY_LIMIT", "20"))
+GLOBAL_DAILY_LIMIT = int(os.environ.get("GLOBAL_DAILY_LIMIT", "300"))
+# For testing from a Mac or the Simulator, where App Attest doesn't exist. Empty = disabled.
+DEV_BYPASS_TOKEN = os.environ.get("DEV_BYPASS_TOKEN", "")
+# Opus 5.5 list prices, for the cost estimate sent to analytics.
+USD_PER_INPUT_TOKEN = 4 / 1_000_000
+USD_PER_OUTPUT_TOKEN = 20 / 1_000_000
 
 INSTRUCTIONS = """You read the display of a home health device in a photo and report the numbers exactly as shown.
 
@@ -131,15 +153,10 @@ def _reply(status, body):
     }
 
 
-def _decode_image(event):
+def _decode_image(body_text):
     """Returns (jpeg_bytes, None) or (None, error_response)."""
-    if event.get("requestContext", {}).get("http", {}).get("method") != "POST":
-        return None, _reply(405, {"error": "Use POST."})
-    raw = event.get("body") or ""
-    if event.get("isBase64Encoded"):
-        raw = base64.b64decode(raw).decode("utf-8", errors="replace")
     try:
-        image_b64 = json.loads(raw)["image_jpeg_base64"]
+        image_b64 = json.loads(body_text)["image_jpeg_base64"]
         jpeg = base64.b64decode(image_b64, validate=True)
     except (ValueError, KeyError, TypeError, binascii.Error):
         return None, _reply(400, {"error": "Send JSON with an image_jpeg_base64 field."})
@@ -150,12 +167,97 @@ def _decode_image(event):
     return jpeg, None
 
 
-def handler(event, context):
-    jpeg, error = _decode_image(event)
-    if error:
-        return error
+def _b64(value):
+    try:
+        return base64.b64decode(value or "", validate=True)
+    except (binascii.Error, ValueError, TypeError):
+        return b""
 
+
+def handler(event, context):
+    http = event.get("requestContext", {}).get("http", {})
+    if http.get("method") != "POST":
+        return _reply(405, {"error": "Use POST."})
+    raw = event.get("body") or ""
+    body = base64.b64decode(raw) if event.get("isBase64Encoded") else raw.encode("utf-8")
+    headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+    install_id = headers.get("x-healthread-install-id", "")[:64]
+    path = http.get("path", "/").rstrip("/") or "/"
+
+    if path == "/challenge":
+        return _reply(200, {"challenge": base64.b64encode(store.new_challenge()).decode()})
+    if path == "/attest":
+        return _attest(body, install_id)
+    if path in ("/", "/read"):
+        return _read(body, headers, install_id)
+    return _reply(404, {"error": "Not found."})
+
+
+def _attest(body, install_id):
+    try:
+        request = json.loads(body)
+        key_id_b64 = request["key_id"]
+        key_id, attestation, challenge = _b64(key_id_b64), _b64(request["attestation"]), _b64(request["challenge"])
+    except (ValueError, KeyError, TypeError):
+        return _reply(400, {"error": "Send key_id, attestation and challenge."})
+    if not (key_id and attestation and challenge) or not store.consume_challenge(challenge):
+        analytics.capture("reading_service_attest", install_id, {"outcome": "bad_challenge"})
+        return _reply(401, {"error": "attest_required"})
+    try:
+        key = verify_attestation(attestation, key_id, challenge, APP_ID, ALLOW_DEVELOPMENT_KEYS)
+    except AttestationError as e:
+        print(json.dumps({"event": "attest_rejected", "reason": str(e)}))
+        analytics.capture("reading_service_attest", install_id, {"outcome": "rejected", "reason": str(e)})
+        return _reply(401, {"error": "attest_required"})
+    store.save_key(key_id_b64, key.public_key_der, key.environment)
+    analytics.capture("reading_service_attest", install_id, {"outcome": "ok", "environment": key.environment})
+    return _reply(200, {"ok": True})
+
+
+def _authorize(body, headers):
+    """Returns (device_id, None) for a genuine app request, else (None, reason)."""
+    if DEV_BYPASS_TOKEN and hmac.compare_digest(headers.get("x-healthread-dev-token", ""), DEV_BYPASS_TOKEN):
+        return "dev-bypass", None
+    key_id_b64 = headers.get("x-appattest-key-id", "")
+    assertion = _b64(headers.get("x-appattest-assertion"))
+    if not key_id_b64 or not assertion:
+        return None, "missing_assertion"
+    key = store.get_key(key_id_b64)
+    if key is None:
+        return None, "unknown_key"
+    try:
+        counter = verify_assertion(assertion, body, key["public_key"], APP_ID, key["counter"])
+    except AttestationError as e:
+        return None, f"bad_assertion: {e}"
+    if not store.advance_counter(key_id_b64, counter):
+        return None, "replayed"
+    return key_id_b64, None
+
+
+def _read(body, headers, install_id):
     started = time.monotonic()
+
+    def report(outcome, status, payload, **extra):
+        analytics.capture("reading_service_request", install_id, {
+            "outcome": outcome, "status": status, "model": MODEL,
+            "ms": int((time.monotonic() - started) * 1000), **extra,
+        })
+        return _reply(status, payload)
+
+    device_id, reason = _authorize(body, headers)
+    if device_id is None:
+        print(json.dumps({"event": "read_rejected", "reason": reason}))
+        return report("unauthorized", 401, {"error": "attest_required"}, reason=reason.split(":")[0])
+
+    jpeg, error = _decode_image(body.decode("utf-8", errors="replace"))
+    if error:
+        return report("bad_request", error["statusCode"], json.loads(error["body"]))
+
+    limit_hit = store.take_reading_slot(device_id, PER_DEVICE_DAILY_LIMIT, GLOBAL_DAILY_LIMIT)
+    if limit_hit:
+        print(json.dumps({"event": "limit_hit", "limit": limit_hit}))
+        return report("rate_limited", 429, {"error": "limit", "limit": limit_hit}, limit=limit_hit)
+
     try:
         response = _anthropic_client().beta.messages.create(
             model=MODEL,
@@ -184,35 +286,36 @@ def handler(event, context):
             fallbacks="default",
         )
     except anthropic.RateLimitError:
-        return _reply(429, {"error": "Busy. Try again shortly."})
+        return report("claude_rate_limited", 429, {"error": "Busy. Try again shortly."})
     except anthropic.APIStatusError as e:
         print(json.dumps({"event": "anthropic_error", "status": e.status_code, "message": str(e.message)[:500]}))
-        return _reply(502, {"error": "Reader unavailable."})
+        return report("claude_error", 502, {"error": "Reader unavailable."}, claude_status=e.status_code)
     except anthropic.APIConnectionError:
         print(json.dumps({"event": "anthropic_connection_error"}))
-        return _reply(502, {"error": "Reader unavailable."})
+        return report("claude_connection_error", 502, {"error": "Reader unavailable."})
     except anthropic.AnthropicError as e:
-        # e.g. the federation rule doesn't match this function's identity yet
+        # e.g. the federation rule doesn't match this function's identity
         print(json.dumps({"event": "anthropic_auth_error", "type": type(e).__name__}))
-        return _reply(502, {"error": "Reader unavailable."})
+        return report("claude_auth_error", 502, {"error": "Reader unavailable."})
 
     usage = response.usage
-    print(json.dumps({
-        "event": "read",
-        "model": response.model,
-        "stop_reason": response.stop_reason,
+    tokens = {
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
-        "ms": int((time.monotonic() - started) * 1000),
-    }))
+        "cost_usd": round(usage.input_tokens * USD_PER_INPUT_TOKEN + usage.output_tokens * USD_PER_OUTPUT_TOKEN, 5),
+        "claude_ms": int((time.monotonic() - started) * 1000),
+    }
+    print(json.dumps({"event": "read", "model": response.model, "stop_reason": response.stop_reason, **tokens}))
 
     if response.stop_reason != "end_turn":
         # refusal (whole fallback chain declined) or max_tokens: report "no reading"
-        return _reply(422, {"error": "Couldn't read this photo."})
+        return report("no_reading", 422, {"error": "Couldn't read this photo."},
+                      stop_reason=response.stop_reason, **tokens)
 
     text = next((b.text for b in response.content if b.type == "text"), None)
     try:
         reading = json.loads(text)
     except (TypeError, ValueError):
-        return _reply(502, {"error": "Reader returned an unexpected answer."})
-    return _reply(200, reading)
+        return report("bad_answer", 502, {"error": "Reader returned an unexpected answer."}, **tokens)
+    # Only the kind of device goes to analytics, never the numbers.
+    return report("ok", 200, reading, device_type=reading.get("device_type"), **tokens)

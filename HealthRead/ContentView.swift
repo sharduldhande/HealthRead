@@ -38,6 +38,9 @@ struct ContentView: View {
         }
         // Ask for camera and Apple Health access only after onboarding, so the
         // system prompts come with context.
+        .task {
+            Analytics.capture("app_opened", ["onboarded": didChooseReadingMode])
+        }
         .task(id: didChooseReadingMode) {
             guard didChooseReadingMode else { return }
             camera.start()

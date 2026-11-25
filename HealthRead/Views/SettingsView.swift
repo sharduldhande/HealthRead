@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
 
     @AppStorage(ReadingMode.storageKey) private var readingModeRaw = ReadingMode.cloudAssisted.rawValue
+    @AppStorage(Analytics.enabledKey) private var analyticsEnabled = true
     @Environment(\.dismiss) private var dismiss
 
     private var readingMode: ReadingMode { ReadingMode(rawValue: readingModeRaw) ?? .cloudAssisted }
@@ -14,6 +15,9 @@ struct SettingsView: View {
                 Section {
                     ForEach(ReadingMode.allCases) { mode in
                         ReadingModeCard(mode: mode, isSelected: readingMode == mode) {
+                            if readingMode != mode {
+                                Analytics.capture("reading_mode_changed", ["mode": mode.rawValue])
+                            }
                             readingModeRaw = mode.rawValue
                         }
                         .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0))
@@ -44,6 +48,16 @@ struct SettingsView: View {
                     Text("Tried in this order")
                 } footer: {
                     Text("If a reader can\u{2019}t run, HealthRead moves on to the next one. You always check the numbers before saving.")
+                }
+
+                Section {
+                    Toggle("Share anonymous usage data", isOn: $analyticsEnabled)
+                        .onChange(of: analyticsEnabled) { _, enabled in
+                            // Record the opt-out itself once, then stop sending.
+                            if !enabled { Analytics.capture("analytics_disabled", force: true) }
+                        }
+                } footer: {
+                    Text("Which features are used and how often reading works, with a random install ID. Never photos, readings or Health data.")
                 }
 
                 Section {

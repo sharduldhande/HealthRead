@@ -7,6 +7,7 @@ struct OnboardingView: View {
     @AppStorage(ReadingMode.storageKey) private var readingModeRaw = ReadingMode.cloudAssisted.rawValue
     @AppStorage(ReadingMode.chosenKey) private var didChooseReadingMode = false
     @State private var selection: ReadingMode = .cloudAssisted
+    @AppStorage(Analytics.enabledKey) private var analyticsEnabled = true
 
     var body: some View {
         ScrollView {
@@ -36,9 +37,25 @@ struct OnboardingView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
+                Toggle(isOn: $analyticsEnabled) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Share anonymous usage data")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Which features are used and how often reading works. Never your photos, readings or Health data. You can turn this off in Settings.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(16)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+
                 Button {
                     readingModeRaw = selection.rawValue
                     didChooseReadingMode = true
+                    Analytics.capture("onboarding_completed", [
+                        "mode": selection.rawValue,
+                        "apple_intelligence": ReadingCoordinator.availability(of: .appleOnDevice) == nil,
+                    ])
                 } label: {
                     Text("Continue")
                         .font(.headline)

@@ -43,6 +43,11 @@ struct CameraTab: View {
     /// Bumped on every new capture so a late result from a cancelled analysis is ignored.
     @State private var analysisID = UUID()
     @State private var showSettings = false
+    /// The numbers as the reader returned them, to tell whether the user corrected them.
+    @State private var readerValues: String?
+    /// "camera" or "photo", for analytics.
+    @State private var inputSource = "camera"
+    @State private var manualAfterFailedRead = false
 
     var body: some View {
         ZStack {
@@ -119,10 +124,10 @@ struct CameraTab: View {
             onFrameCaptured: { frame, hint in
                 triggerHaptic(.medium)
                 guard let image = UIImage.from(pixelBuffer: frame) else { return }
-                beginAnalysis(of: image, hint: hint)
+                beginAnalysis(of: image, hint: hint, source: "camera")
             },
             onPhotoPicked: { image in
-                beginAnalysis(of: image.normalizedForReading(), hint: nil)
+                beginAnalysis(of: image.normalizedForReading(), hint: nil, source: "photo")
             },
             onEnterManually: { device in
                 startManualEntry(device, keepingImage: false)
@@ -213,7 +218,8 @@ struct CameraTab: View {
 
     // MARK: - Analysis
 
-    private func beginAnalysis(of image: UIImage, hint: DeviceType?) {
+    private func beginAnalysis(of image: UIImage, hint: DeviceType?, source: String) {
+        inputSource = source
         capturedImage = image
         measuredAt = Date()
         let id = UUID()
@@ -230,11 +236,33 @@ struct CameraTab: View {
             }
             return
         }
-        let (result, reader) = await coordinator.read(cgImage, mode: readingMode, hint: hint)
+        let started = Date()
+        let outcome = await coordinator.read(cgImage, mode: readingMode, hint: hint)
+        let (result, reader) = (outcome.result, outcome.reader)
+
+        let resultLabel: String
+        switch result {
+        case .bloodPressure, .weight: resultLabel = "read"
+        case .noDeviceDetected: resultLabel = "no_device"
+        case .error: resultLabel = "failed"
+        }
+        Analytics.capture("reading_attempt", [
+            "mode": readingMode.rawValue,
+            "input": inputSource,
+            "outcome": resultLabel,
+            "reader": reader?.rawValue ?? "none",
+            "attempts": outcome.attempts.map(\.analyticsValue),
+            "total_ms": Int(Date().timeIntervalSince(started) * 1000),
+            "mobileclip_hint": hint.map { $0 == .bloodPressure ? "blood_pressure" : "weight_scale" } ?? "none",
+            "apple_intelligence": ReadingCoordinator.availability(of: .appleOnDevice) == nil,
+        ])
 
         await MainActor.run {
             // Ignore results for an analysis the user cancelled or replaced.
-            guard id == analysisID, appState == .processing else { return }
+            guard id == analysisID, appState == .processing else {
+                Analytics.capture("reading_discarded", ["stage": "processing", "input": inputSource])
+                return
+            }
 
             switch result {
             case .bloodPressure(let reading):
@@ -242,19 +270,21 @@ struct CameraTab: View {
                 diastolic = String(reading.diastolic)
                 pulse = reading.pulse.map { String($0) } ?? ""
                 readingSource = reader.map(ReadingSource.reader) ?? .manual
+                readerValues = currentValues(.bloodPressure)
                 withAnimation { appState = .confirm(.bloodPressure) }
 
             case .weight(let reading):
                 weight = String(format: "%.1f", reading.weight)
                 weightUnit = reading.unit
                 readingSource = reader.map(ReadingSource.reader) ?? .manual
+                readerValues = currentValues(.weightScale)
                 withAnimation { appState = .confirm(.weightScale) }
 
             case .noDeviceDetected:
                 readErrorMessage = "No blood pressure monitor or scale display was found in the photo. Try again with the display filling more of the frame, or type the numbers in."
                 showReadError = true
 
-            case .error(let message):
+            case .error(let message, _):
                 readErrorMessage = message
                 showReadError = true
             }
@@ -264,6 +294,12 @@ struct CameraTab: View {
     // MARK: - Manual Entry
 
     private func startManualEntry(_ device: DeviceType, keepingImage: Bool) {
+        manualAfterFailedRead = keepingImage
+        readerValues = nil
+        Analytics.capture("manual_entry_started", [
+            "device_type": device == .bloodPressure ? "blood_pressure" : "weight_scale",
+            "after_failed_read": keepingImage,
+        ])
         if !keepingImage {
             capturedImage = nil
             measuredAt = Date()
@@ -299,11 +335,27 @@ struct CameraTab: View {
                 }
 
                 triggerHaptic(.success)
+                let source: String
+                switch readingSource {
+                case .reader(let kind): source = kind.rawValue
+                case .manual: source = manualAfterFailedRead ? "manual_after_failed_read" : "manual"
+                }
+                // `edited` compares the saved numbers with the reader's; the numbers themselves are never sent.
+                Analytics.capture("reading_saved", [
+                    "device_type": device == .bloodPressure ? "blood_pressure" : "weight_scale",
+                    "source": source,
+                    "edited": readerValues.map { $0 != currentValues(device) } ?? false,
+                    "time_changed": abs(measuredAt.timeIntervalSinceNow) > 120,
+                    "destination": savedToAppleHealth ? "apple_health" : "app_only",
+                    "mode": readingMode.rawValue,
+                ])
                 await MainActor.run {
                     isSaving = false
                     withAnimation { appState = .saved(device) }
                 }
             } catch {
+                let denied = (error as? HKError)?.code == .errorAuthorizationDenied
+                Analytics.capture("reading_save_failed", ["reason": denied ? "health_access_denied" : "other"])
                 await MainActor.run {
                     isSaving = false
                     saveErrorMessage = Self.describeSaveError(error)
@@ -322,7 +374,17 @@ struct CameraTab: View {
 
     // MARK: - Reset
 
+    /// The values on the confirm screen as one string, used only to detect edits on this phone.
+    private func currentValues(_ device: DeviceType) -> String {
+        device == .bloodPressure ? "\(systolic)/\(diastolic)/\(pulse)" : "\(weight)\(weightUnit.rawValue)"
+    }
+
     private func resetToScanning() {
+        if case .confirm = appState {
+            Analytics.capture("reading_discarded", ["stage": "confirm", "input": capturedImage == nil ? "manual" : inputSource])
+        }
+        readerValues = nil
+        manualAfterFailedRead = false
         analysisID = UUID()
         capturedImage = nil
         systolic = ""

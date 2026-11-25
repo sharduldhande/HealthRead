@@ -31,6 +31,35 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional. wrkspc_ ID of the HealthRead workspace (needed if the rule covers several).
+  AppId:
+    Type: String
+    Default: LJA3588388.com.shardul.HealthRead
+    Description: App Attest app ID, "<Team ID>.<bundle ID>". Only this app's devices can attest.
+  AllowDevelopmentKeys:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Accept App Attest keys from development builds (Xcode installs). TestFlight uses production keys.
+  PerDeviceDailyLimit:
+    Type: Number
+    Default: 20
+    Description: Claude readings one device may make per day (UTC).
+  GlobalDailyLimit:
+    Type: Number
+    Default: 300
+    Description: Claude readings all devices together may make per day (UTC).
+  DevBypassToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional. Lets test scripts skip App Attest with an X-HealthRead-Dev-Token header. Empty = off.
+  PostHogApiKey:
+    Type: String
+    Default: ""
+    Description: PostHog project API key (write-only, public by design). Empty = no analytics.
+  PostHogHost:
+    Type: String
+    Default: https://eu.i.posthog.com
   MaxConcurrency:
     Type: Number
     Default: 0
@@ -42,6 +71,19 @@ Conditions:
   ReserveConcurrency: !Not [!Equals [!Ref MaxConcurrency, 0]]
 
 Resources:
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: healthread-reading-service
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
   ReadingFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -62,6 +104,13 @@ Resources:
               - Effect: Allow
                 Action: sts:GetWebIdentityToken
                 Resource: "*"
+        - PolicyName: state-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem]
+                Resource: !GetAtt StateTable.Arn
 
   ReadingFunction:
     Type: AWS::Serverless::Function
@@ -83,6 +132,14 @@ Resources:
           ANTHROPIC_FEDERATION_RULE_ID: !Ref AnthropicFederationRuleId
           ANTHROPIC_SERVICE_ACCOUNT_ID: !Ref AnthropicServiceAccountId
           ANTHROPIC_WORKSPACE_ID: !Ref AnthropicWorkspaceId
+          TABLE_NAME: !Ref StateTable
+          APP_ID: !Ref AppId
+          ALLOW_DEVELOPMENT_KEYS: !Ref AllowDevelopmentKeys
+          PER_DEVICE_DAILY_LIMIT: !Ref PerDeviceDailyLimit
+          GLOBAL_DAILY_LIMIT: !Ref GlobalDailyLimit
+          DEV_BYPASS_TOKEN: !Ref DevBypassToken
+          POSTHOG_API_KEY: !Ref PostHogApiKey
+          POSTHOG_HOST: !Ref PostHogHost
       FunctionUrlConfig:
         AuthType: NONE
       LoggingConfig:

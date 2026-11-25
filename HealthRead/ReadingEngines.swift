@@ -1,4 +1,6 @@
 import CoreGraphics
+import CryptoKit
+import DeviceCheck
 import Foundation
 import ImageIO
 import UIKit
@@ -15,7 +17,8 @@ enum ReadingResult {
     case weight(WeightReading)
     case noDeviceDetected
     /// The reader could not run or failed; the coordinator moves on to the next reader.
-    case error(String)
+    /// `category` is a short fixed label for analytics (never contains reading data).
+    case error(String, category: String = "failed")
 }
 
 /// The reader that produced a set of numbers. Shown on the confirm screen.
@@ -129,10 +132,27 @@ actor ReadingCoordinator {
     private let claude = ClaudeReader()
     private let textRecognition = TextRecognitionReader()
 
-    func read(_ image: CGImage, mode: ReadingMode, hint: DeviceType?) async -> (ReadingResult, ReaderKind?) {
+    /// One reader's turn, for analytics: which reader, how it ended, how long it took.
+    struct Attempt {
+        let reader: ReaderKind
+        let outcome: String   // "read", "no_device" or the error category
+        let ms: Int
+
+        var analyticsValue: [String: Any] { ["reader": reader.rawValue, "outcome": outcome, "ms": ms] }
+    }
+
+    struct Outcome {
+        let result: ReadingResult
+        let reader: ReaderKind?
+        let attempts: [Attempt]
+    }
+
+    func read(_ image: CGImage, mode: ReadingMode, hint: DeviceType?) async -> Outcome {
         var lastError = "No reader is available on this iPhone."
         var sawNoDevice: ReaderKind?
+        var attempts: [Attempt] = []
         for kind in mode.readers {
+            let started = Date()
             let result: ReadingResult
             switch kind {
             case .claude:
@@ -142,22 +162,29 @@ actor ReadingCoordinator {
             case .textRecognition:
                 result = await textRecognition.read(image, hint: hint)
             }
-            if case .error(let message) = result {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            switch result {
+            case .error(let message, let category):
                 print("Reader \(kind.rawValue) skipped: \(message)")
+                attempts.append(Attempt(reader: kind, outcome: category, ms: ms))
                 lastError = message
                 continue
+            case .noDeviceDetected:
+                attempts.append(Attempt(reader: kind, outcome: "no_device", ms: ms))
+                if kind == .applePrivateCloud || kind == .appleOnDevice {
+                    print("Reader \(kind.rawValue) saw no device; asking the next reader")
+                    sawNoDevice = kind
+                    continue
+                }
+            case .bloodPressure, .weight:
+                attempts.append(Attempt(reader: kind, outcome: "read", ms: ms))
             }
-            if case .noDeviceDetected = result, kind == .applePrivateCloud || kind == .appleOnDevice {
-                print("Reader \(kind.rawValue) saw no device; asking the next reader")
-                sawNoDevice = kind
-                continue
-            }
-            return (result, kind)
+            return Outcome(result: result, reader: kind, attempts: attempts)
         }
         if let sawNoDevice {
-            return (.noDeviceDetected, sawNoDevice)
+            return Outcome(result: .noDeviceDetected, reader: sawNoDevice, attempts: attempts)
         }
-        return (.error(lastError), nil)
+        return Outcome(result: .error(lastError), reader: nil, attempts: attempts)
     }
 
     /// For Settings: which readers can run right now on this phone.
@@ -175,8 +202,9 @@ actor ReadingCoordinator {
 
 // MARK: - Claude (through HealthRead's AWS function)
 
-/// Sends one JPEG to HealthRead's reading service, which calls Claude with a key that
-/// never leaves AWS. The app holds no API key.
+/// Sends one JPEG to HealthRead's reading service (an AWS function that signs in to Claude
+/// with workload identity federation). The app holds no API key; each request is signed
+/// with an App Attest key so only genuine installs can use the service.
 struct ClaudeReader {
 
     /// Public HTTPS endpoint of the reading service (an AWS Lambda function URL).
@@ -194,36 +222,121 @@ struct ClaudeReader {
     }()
 
     func read(_ image: CGImage) async -> ReadingResult {
-        guard let url = Self.serviceURL else {
-            return .error("Cloud reading isn\u{2019}t set up in this build.")
+        guard let baseURL = Self.serviceURL else {
+            return .error("Cloud reading isn\u{2019}t set up in this build.", category: "not_configured")
         }
-        guard let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.8) else {
+        guard DCAppAttestService.shared.isSupported else {
+            // Simulator, or a device without the Secure Enclave support App Attest needs.
+            return .error("Cloud reading needs App Attest, which this device doesn\u{2019}t support.", category: "attest_unsupported")
+        }
+        guard let jpeg = UIImage(cgImage: image).jpegData(compressionQuality: 0.8),
+              let body = try? JSONSerialization.data(withJSONObject: ["image_jpeg_base64": jpeg.base64EncodedString()])
+        else {
             return .error("Couldn\u{2019}t prepare the photo.")
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("ios", forHTTPHeaderField: "X-HealthRead-Client")
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: ["image_jpeg_base64": jpeg.base64EncodedString()])
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                return .error("No response from the reading service.")
+        // At most two tries: the second after re-attesting, if the server no longer knows our key.
+        for attempt in 0..<2 {
+            let keyID: String
+            let assertion: Data
+            do {
+                keyID = try await AppAttestClient.shared.attestedKeyID(baseURL: baseURL, session: session)
+                assertion = try await DCAppAttestService.shared.generateAssertion(
+                    keyID, clientDataHash: Data(SHA256.hash(data: body)))
+            } catch let error as URLError where error.code == .notConnectedToInternet {
+                return .error("No internet connection.", category: "offline")
+            } catch {
+                await AppAttestClient.shared.reset()
+                if attempt == 0 { continue }
+                return .error("Couldn\u{2019}t verify this copy of HealthRead: \(error.localizedDescription)", category: "attest_failed")
             }
-            switch http.statusCode {
-            case 200:
-                return try JSONDecoder().decode(ModelReading.self, from: data).result
-            case 429:
-                return .error("The reading service is busy. Using the on-device reader instead.")
-            default:
-                return .error("The reading service returned an error (\(http.statusCode)).")
+
+            var request = URLRequest(url: baseURL.appending(path: "read"))
+            request.httpMethod = "POST"
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(keyID, forHTTPHeaderField: "X-AppAttest-Key-Id")
+            request.setValue(assertion.base64EncodedString(), forHTTPHeaderField: "X-AppAttest-Assertion")
+            request.setValue(Analytics.installID, forHTTPHeaderField: "X-HealthRead-Install-Id")
+            do {
+                let (data, response) = try await session.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                switch status {
+                case 200:
+                    return try JSONDecoder().decode(ModelReading.self, from: data).result
+                case 401:
+                    await AppAttestClient.shared.reset()
+                    if attempt == 0 { continue }
+                    return .error("The reading service didn\u{2019}t accept this copy of HealthRead.", category: "attest_rejected")
+                case 422:
+                    return .error("Claude couldn\u{2019}t read this photo.", category: "no_reading")
+                case 429:
+                    return .error("Cloud reading has hit today\u{2019}s limit. Reading on this iPhone instead.", category: "rate_limited")
+                default:
+                    return .error("The reading service returned an error (\(status)).", category: "server_error")
+                }
+            } catch let error as URLError where error.code == .notConnectedToInternet {
+                return .error("No internet connection.", category: "offline")
+            } catch {
+                return .error("Cloud reading failed: \(error.localizedDescription)", category: "network_error")
             }
-        } catch let error as URLError where error.code == .notConnectedToInternet {
-            return .error("No internet connection.")
-        } catch {
-            return .error("Cloud reading failed: \(error.localizedDescription)")
         }
+        return .error("Couldn\u{2019}t verify this copy of HealthRead.", category: "attest_failed")
+    }
+}
+
+/// Apple App Attest key for talking to the reading service. The private key never leaves
+/// the Secure Enclave; the service checks Apple's certificate once (attestation), then a
+/// signature on every request (assertion), so only genuine HealthRead installs can use it.
+actor AppAttestClient {
+
+    static let shared = AppAttestClient()
+
+    private let keyIDKey = "appAttestKeyID"
+    private let attestedKey = "appAttestKeyAttested"
+
+    /// A key ID the server has accepted, creating and attesting one if needed.
+    func attestedKeyID(baseURL: URL, session: URLSession) async throws -> String {
+        let defaults = UserDefaults.standard
+        if let keyID = defaults.string(forKey: keyIDKey), defaults.bool(forKey: attestedKey) {
+            return keyID
+        }
+        let keyID = try await DCAppAttestService.shared.generateKey()
+
+        // 1. One-time challenge from the server.
+        var challengeRequest = URLRequest(url: baseURL.appending(path: "challenge"))
+        challengeRequest.httpMethod = "POST"
+        let (challengeData, _) = try await session.data(for: challengeRequest)
+        guard let challengeB64 = (try JSONSerialization.jsonObject(with: challengeData) as? [String: Any])?["challenge"] as? String,
+              let challenge = Data(base64Encoded: challengeB64)
+        else { throw URLError(.badServerResponse) }
+
+        // 2. Apple certifies the key, bound to the challenge.
+        let attestation = try await DCAppAttestService.shared.attestKey(
+            keyID, clientDataHash: Data(SHA256.hash(data: challenge)))
+
+        // 3. The server checks Apple's certificate and remembers the key.
+        var attestRequest = URLRequest(url: baseURL.appending(path: "attest"))
+        attestRequest.httpMethod = "POST"
+        attestRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        attestRequest.setValue(Analytics.installID, forHTTPHeaderField: "X-HealthRead-Install-Id")
+        attestRequest.httpBody = try JSONSerialization.data(withJSONObject: [
+            "key_id": keyID,
+            "attestation": attestation.base64EncodedString(),
+            "challenge": challengeB64,
+        ])
+        let (_, response) = try await session.data(for: attestRequest)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.userAuthenticationRequired) }
+
+        defaults.set(keyID, forKey: keyIDKey)
+        defaults.set(true, forKey: attestedKey)
+        return keyID
+    }
+
+    /// Forget the key so the next request creates and attests a new one.
+    func reset() {
+        UserDefaults.standard.removeObject(forKey: keyIDKey)
+        UserDefaults.standard.removeObject(forKey: attestedKey)
     }
 }
 
@@ -264,7 +377,7 @@ enum AppleModelReader {
 
     static func read(_ image: CGImage, privateCloud: Bool) async -> ReadingResult {
         if let reason = unavailableReason(privateCloud: privateCloud) {
-            return .error(reason)
+            return .error(reason, category: "unavailable")
         }
         #if canImport(FoundationModels)
         guard #available(iOS 27.0, *) else { return .error("Needs iOS 27") }
@@ -346,7 +459,7 @@ struct TextRecognitionReader {
         // Clock times ("7:35") and dates are on most monitors and are never the reading.
         let texts = await recognize(image).map(Self.removingTimesAndDates)
         guard texts.contains(where: { $0.contains(where: \.isNumber) }) else {
-            return .error("Text recognition found no numbers on the display.")
+            return .error("Text recognition found no numbers on the display.", category: "no_text")
         }
         if hint != .weightScale, let bp = Self.parseBloodPressure(texts) {
             return .bloodPressure(bp)
@@ -363,7 +476,7 @@ struct TextRecognitionReader {
         if hint != .bloodPressure, looksLikeScale, let weight = Self.parseWeight(texts) {
             return .weight(WeightReading(weight: weight, unit: joined.contains("kg") ? .kg : .lbs))
         }
-        return .error("Text recognition couldn\u{2019}t read this display. Seven-segment digits are hard for it; try again closer and without glare, or type the numbers.")
+        return .error("Text recognition couldn\u{2019}t read this display. Seven-segment digits are hard for it; try again closer and without glare, or type the numbers.", category: "no_reading")
     }
 
     static func removingTimesAndDates(_ text: String) -> String {
