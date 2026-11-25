@@ -433,6 +433,11 @@ struct AppleDisplayReading {
     var weightUnit: AppleWeightUnit?
 
     var result: ReadingResult {
+        // Apple's models fill optional numbers with 0 instead of leaving them out, so 0 means missing.
+        let systolic = systolic.flatMap { $0 > 0 ? $0 : nil }
+        let diastolic = diastolic.flatMap { $0 > 0 ? $0 : nil }
+        let pulse = pulse.flatMap { $0 > 0 ? $0 : nil }
+        let weightValue = weightValue.flatMap { $0 > 0 ? $0 : nil }
         switch deviceType {
         case .bloodPressureMonitor:
             guard let systolic, let diastolic else {
