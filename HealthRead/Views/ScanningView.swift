@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreML
+import PhotosUI
 import SwiftUI
 
 /// Minimum cosine similarity to consider a device "detected"
@@ -25,6 +26,8 @@ struct ScanningView: View {
     let camera: CameraController
     @Binding var backCamera: Bool
     let onFrameCaptured: (CVPixelBuffer) -> Void
+    let onPhotoPicked: (UIImage) -> Void
+    let onEnterManually: (DeviceType) -> Void
 
     // MobileCLIP state (for detection indicator only)
     @State private var zsclassifier = ZSImageClassification(model: defaultModel.factory())
@@ -34,6 +37,7 @@ struct ScanningView: View {
     @State private var isModelLoaded = false
     @State private var pulseAnimation = false
     @State private var latestFrame: CVPixelBuffer?
+    @State private var pickedPhoto: PhotosPickerItem?
 
     var body: some View {
         ZStack {
@@ -45,7 +49,9 @@ struct ScanningView: View {
 
                 // Camera viewport
                 ZStack {
-                    if let framesToDisplay {
+                    if camera.status == .denied || camera.status == .unavailable {
+                        cameraUnavailableView
+                    } else if let framesToDisplay {
                         VideoFrameView(frames: framesToDisplay, backCamera: $backCamera)
                             .clipShape(RoundedRectangle(cornerRadius: 24))
                     } else {
@@ -80,9 +86,26 @@ struct ScanningView: View {
 
                 Spacer().frame(height: 16)
 
-                // Capture button
-                captureButton
-                    .padding(.bottom, 24)
+                // Photo library · capture · manual entry
+                HStack {
+                    photoButton
+                        .frame(maxWidth: .infinity)
+                    captureButton
+                    manualEntryButton
+                        .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+        }
+        .onChange(of: pickedPhoto) { _, item in
+            guard let item else { return }
+            pickedPhoto = nil
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    await MainActor.run { onPhotoPicked(image) }
+                }
             }
         }
         .onChange(of: detectedDevice) { _, newDevice in
@@ -116,6 +139,71 @@ struct ScanningView: View {
         }
         .disabled(latestFrame == nil)
         .opacity(latestFrame != nil ? 1.0 : 0.4)
+        .accessibilityLabel("Capture")
+        .accessibilityHint("Takes a photo of the display and reads it")
+    }
+
+    // MARK: - Camera Unavailable
+
+    /// Shown instead of an endless spinner when camera access is off or there is no camera.
+    private var cameraUnavailableView: some View {
+        RoundedRectangle(cornerRadius: 24)
+            .fill(Color(.systemGray6))
+            .overlay {
+                VStack(spacing: 14) {
+                    Image(systemName: camera.status == .denied ? "video.slash" : "camera.badge.ellipsis")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(camera.status == .denied ? "Camera access is off" : "No camera available")
+                        .font(.headline)
+                    Text("You can still choose a photo of your monitor or scale, or type the numbers in.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    if camera.status == .denied {
+                        Button("Open Settings") {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(28)
+            }
+    }
+
+    // MARK: - Secondary Buttons
+
+    private var photoButton: some View {
+        PhotosPicker(selection: $pickedPhoto, matching: .images) {
+            secondaryButtonLabel("Photo", systemImage: "photo.on.rectangle")
+        }
+        .accessibilityLabel("Choose a photo")
+        .accessibilityHint("Reads a photo of your monitor or scale from your library")
+    }
+
+    private var manualEntryButton: some View {
+        Menu {
+            Button("Blood Pressure", systemImage: "heart.fill") { onEnterManually(.bloodPressure) }
+            Button("Weight", systemImage: "scalemass.fill") { onEnterManually(.weightScale) }
+        } label: {
+            secondaryButtonLabel("Type It", systemImage: "keyboard")
+        }
+        .accessibilityLabel("Enter a reading by hand")
+    }
+
+    private func secondaryButtonLabel(_ title: String, systemImage: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .frame(width: 52, height: 52)
+                .background(.white.opacity(0.15), in: Circle())
+            Text(title)
+                .font(.caption)
+        }
+        .foregroundStyle(.white)
     }
 
     // MARK: - Status Pill

@@ -38,3 +38,11 @@ enum DeviceType: String, Equatable {
         }
     }
 }
+
+/// Where the numbers on the confirm screen came from.
+enum ReadingSource: Equatable {
+    /// Read from the photo by an AI model; the user must check them.
+    case ai
+    /// Typed in by the user.
+    case manual
+}

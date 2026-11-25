@@ -54,7 +54,7 @@ struct BPHistoryTab: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Blood Pressure")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     if !readings.isEmpty {
                         EditButton()
                     }
@@ -134,15 +134,17 @@ struct BPHistoryTab: View {
     }
 
     private func classifyBP(systolic: Int, diastolic: Int) -> (String, Color) {
-        if systolic < 120 && diastolic < 80 {
-            return ("Normal", .green)
-        } else if systolic < 130 && diastolic < 80 {
-            return ("Elevated", .yellow)
-        } else if systolic < 140 || diastolic < 90 {
-            return ("High Blood Pressure Stage 1", .orange)
-        } else {
-            return ("High Blood Pressure Stage 2", .red)
+        let category = BPCategory(systolic: systolic, diastolic: diastolic)
+        let color: Color
+        switch category {
+        case .low: color = .blue
+        case .normal: color = .green
+        case .elevated: color = .yellow
+        case .stage1: color = .orange
+        case .stage2: color = .red
+        case .crisis: color = .purple
         }
+        return (category.label, color)
     }
 
     // MARK: - Row
@@ -193,7 +195,7 @@ struct BPHistoryTab: View {
             Text("No Blood Pressure Readings")
                 .font(.title3)
                 .fontWeight(.semibold)
-            Text("Use the Camera tab to scan\nyour blood pressure monitor.")
+            Text("Use the Scan tab to read\nyour blood pressure monitor.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

@@ -1,4 +1,4 @@
-import CoreML
+import HealthKit
 import SwiftUI
 import UIKit
 
@@ -15,7 +15,11 @@ struct CameraTab: View {
 
     // App state
     @State private var appState: AppState = .scanning
-    @State private var frozenFrame: CVPixelBuffer?
+    /// The photo being read: a camera frame or a library photo. Kept on the confirm
+    /// screen so the user can compare the numbers against it.
+    @State private var capturedImage: UIImage?
+    @State private var readingSource: ReadingSource = .manual
+    @State private var measuredAt = Date()
 
     // Blood pressure fields
     @State private var systolic = ""
@@ -28,10 +32,14 @@ struct CameraTab: View {
 
     // UI state
     @State private var saveSummary = ""
-    @State private var isProcessing = false
+    @State private var savedToAppleHealth = true
     @State private var isSaving = false
-    @State private var errorMessage: String?
-    @State private var showError = false
+    @State private var readErrorMessage: String?
+    @State private var showReadError = false
+    @State private var saveErrorMessage: String?
+    @State private var showSaveError = false
+    /// Bumped on every new capture so a late result from a cancelled analysis is ignored.
+    @State private var analysisID = UUID()
 
     var body: some View {
         ZStack {
@@ -40,10 +48,12 @@ struct CameraTab: View {
             switch appState {
             case .scanning:
                 scanningLayer
+                    .environment(\.colorScheme, .dark)
                     .transition(.opacity)
 
             case .processing:
                 processingLayer
+                    .environment(\.colorScheme, .dark)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
 
             case .confirm(let device):
@@ -54,6 +64,8 @@ struct CameraTab: View {
                 SuccessView(
                     deviceType: device,
                     summary: saveSummary,
+                    measuredAt: measuredAt,
+                    savedToAppleHealth: savedToAppleHealth,
                     onDone: { tab in
                         resetToScanning()
                         selectedTab = tab
@@ -63,18 +75,20 @@ struct CameraTab: View {
             }
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: appState)
-        .alert("Unable to Read", isPresented: $showError) {
-            Button("Try Again", role: .cancel) {
-                resetToScanning()
-            }
+        .alert("Couldn\u{2019}t Read the Display", isPresented: $showReadError) {
+            Button("Enter Blood Pressure") { startManualEntry(.bloodPressure, keepingImage: true) }
+            Button("Enter Weight") { startManualEntry(.weightScale, keepingImage: true) }
+            Button("Try Again", role: .cancel) { resetToScanning() }
         } message: {
-            Text(errorMessage ?? "Please try again")
+            Text(readErrorMessage ?? "Please try again.")
+        }
+        .alert("Couldn\u{2019}t Save", isPresented: $showSaveError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(saveErrorMessage ?? "Something went wrong. Your reading was not saved.")
         }
         .onAppear {
-            if let saved = UserDefaults.standard.string(forKey: "weightUnit"),
-               let unit = WeightUnit(rawValue: saved) {
-                weightUnit = unit
-            }
+            weightUnit = Self.preferredWeightUnit
         }
     }
 
@@ -86,26 +100,30 @@ struct CameraTab: View {
             backCamera: $backCamera,
             onFrameCaptured: { frame in
                 triggerHaptic(.medium)
-                frozenFrame = frame
-                withAnimation {
-                    appState = .processing
-                }
-                Task {
-                    await performGeminiAnalysis(frame: frame)
-                }
+                guard let image = UIImage.from(pixelBuffer: frame) else { return }
+                beginAnalysis(of: image)
+            },
+            onPhotoPicked: { image in
+                beginAnalysis(of: image.normalizedForReading())
+            },
+            onEnterManually: { device in
+                startManualEntry(device, keepingImage: false)
             }
         )
     }
 
-    // MARK: - Processing (Gemini analyzing)
+    // MARK: - Processing (analyzing the photo)
 
     private var processingLayer: some View {
         VStack {
             Spacer()
 
-            if let frozenFrame {
-                FrozenFrameThumb(frame: frozenFrame)
+            if let capturedImage {
+                Image(uiImage: capturedImage)
+                    .resizable()
+                    .scaledToFill()
                     .frame(height: 300)
+                    .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 20))
                     .overlay(
                         RoundedRectangle(cornerRadius: 20)
@@ -113,20 +131,22 @@ struct CameraTab: View {
                             .foregroundStyle(.white.opacity(0.5))
                     )
                     .padding(.horizontal, 20)
+                    .accessibilityLabel("Captured photo")
             }
 
             VStack(spacing: 12) {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("Analyzing image...")
+                    Text("Reading the display\u{2026}")
                         .fontWeight(.semibold)
                 }
                 .font(.title3)
 
-                Text("Reading device display with AI")
+                Text("You\u{2019}ll check the numbers before anything is saved.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
             .padding(20)
             .frame(maxWidth: .infinity)
@@ -135,12 +155,10 @@ struct CameraTab: View {
             .padding(.horizontal, 20)
 
             Button(action: resetToScanning) {
-                HStack {
-                    Image(systemName: "xmark")
-                    Text("Cancel")
-                }
-                .foregroundStyle(.secondary)
+                Label("Cancel", systemImage: "xmark")
             }
+            .buttonStyle(.bordered)
+            .tint(.white)
             .padding(.vertical, 16)
 
             Spacer()
@@ -152,57 +170,84 @@ struct CameraTab: View {
     private func confirmLayer(device: DeviceType) -> some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 0) {
-                    Spacer().frame(height: 20)
-                    ConfirmReadingView(
-                        deviceType: device,
-                        frozenFrame: frozenFrame,
-                        onSave: { saveReading(device: device) },
-                        onRetake: resetToScanning,
-                        systolic: $systolic,
-                        diastolic: $diastolic,
-                        pulse: $pulse,
-                        weight: $weight,
-                        weightUnit: $weightUnit
-                    )
-                }
+                ConfirmReadingView(
+                    deviceType: device,
+                    image: capturedImage,
+                    source: readingSource,
+                    onSave: { saveReading(device: device) },
+                    onRetake: resetToScanning,
+                    isSaving: isSaving,
+                    measuredAt: $measuredAt,
+                    systolic: $systolic,
+                    diastolic: $diastolic,
+                    pulse: $pulse,
+                    weight: $weight,
+                    weightUnit: $weightUnit
+                )
+                .padding(.top, 20)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .background(.ultraThinMaterial)
+            .scrollDismissesKeyboard(.immediately)
+            .background(Color(.systemGroupedBackground))
         }
     }
 
-    // MARK: - Gemini Analysis
+    // MARK: - Analysis
 
-    private func performGeminiAnalysis(frame: CVPixelBuffer) async {
-        isProcessing = true
+    private func beginAnalysis(of image: UIImage) {
+        capturedImage = image
+        measuredAt = Date()
+        let id = UUID()
+        analysisID = id
+        withAnimation { appState = .processing }
+        Task { await performAnalysis(image: image, id: id) }
+    }
 
-        let result = await geminiService.analyze(frame: frame)
+    private func performAnalysis(image: UIImage, id: UUID) async {
+        let result = await geminiService.analyze(image: image)
 
         await MainActor.run {
-            isProcessing = false
+            // Ignore results for an analysis the user cancelled or replaced.
+            guard id == analysisID, appState == .processing else { return }
 
             switch result {
             case .bloodPressure(let reading):
                 systolic = String(reading.systolic)
                 diastolic = String(reading.diastolic)
                 pulse = reading.pulse.map { String($0) } ?? ""
+                readingSource = .ai
                 withAnimation { appState = .confirm(.bloodPressure) }
 
             case .weight(let reading):
                 weight = String(format: "%.1f", reading.weight)
                 weightUnit = reading.unit
+                readingSource = .ai
                 withAnimation { appState = .confirm(.weightScale) }
 
             case .noDeviceDetected:
-                errorMessage = "No blood pressure monitor or weight scale detected. Make sure the device display is clearly visible and try again."
-                showError = true
+                readErrorMessage = "No blood pressure monitor or scale display was found in the photo. Try again with the display filling more of the frame, or type the numbers in."
+                showReadError = true
 
             case .error(let message):
-                errorMessage = message
-                showError = true
+                readErrorMessage = message
+                showReadError = true
             }
         }
+    }
+
+    // MARK: - Manual Entry
+
+    private func startManualEntry(_ device: DeviceType, keepingImage: Bool) {
+        if !keepingImage {
+            capturedImage = nil
+            measuredAt = Date()
+        }
+        systolic = ""
+        diastolic = ""
+        pulse = ""
+        weight = ""
+        weightUnit = Self.preferredWeightUnit
+        readingSource = .manual
+        withAnimation { appState = .confirm(device) }
     }
 
     // MARK: - Save
@@ -215,13 +260,13 @@ struct CameraTab: View {
             do {
                 if device == .bloodPressure {
                     guard let sys = Int(systolic), let dia = Int(diastolic) else { isSaving = false; return }
-                    let reading = BloodPressureReading(systolic: sys, diastolic: dia, pulse: Int(pulse))
-                    try await healthKit.saveBloodPressure(reading)
+                    let reading = BloodPressureReading(systolic: sys, diastolic: dia, pulse: Int(pulse), timestamp: measuredAt)
+                    savedToAppleHealth = try await healthKit.saveBloodPressure(reading) == .appleHealth
                     saveSummary = "\(sys)/\(dia) mmHg" + (reading.pulse.map { " · \($0) bpm" } ?? "")
                 } else {
                     guard let wt = Double(weight) else { isSaving = false; return }
-                    let reading = WeightReading(weight: wt, unit: weightUnit)
-                    try await healthKit.saveWeight(reading)
+                    let reading = WeightReading(weight: wt, unit: weightUnit, timestamp: measuredAt)
+                    savedToAppleHealth = try await healthKit.saveWeight(reading) == .appleHealth
                     saveSummary = String(format: "%.1f %@", wt, weightUnit.rawValue)
                     UserDefaults.standard.set(weightUnit.rawValue, forKey: "weightUnit")
                 }
@@ -232,26 +277,45 @@ struct CameraTab: View {
                     withAnimation { appState = .saved(device) }
                 }
             } catch {
-                print("Failed to save: \(error)")
-                isSaving = false
+                await MainActor.run {
+                    isSaving = false
+                    saveErrorMessage = Self.describeSaveError(error)
+                    showSaveError = true
+                }
             }
         }
+    }
+
+    private static func describeSaveError(_ error: Error) -> String {
+        if let hkError = error as? HKError, hkError.code == .errorAuthorizationDenied {
+            return "HealthRead isn\u{2019}t allowed to write to Apple Health. Turn it on in Settings \u{203A} Health \u{203A} Data Access & Devices \u{203A} HealthRead, then tap Save again."
+        }
+        return "Your reading was not saved. \(error.localizedDescription)"
     }
 
     // MARK: - Reset
 
     private func resetToScanning() {
-        frozenFrame = nil
+        analysisID = UUID()
+        capturedImage = nil
         systolic = ""
         diastolic = ""
         pulse = ""
         weight = ""
-        isProcessing = false
         isSaving = false
         withAnimation { appState = .scanning }
     }
 
-    // MARK: - Haptics
+    // MARK: - Helpers
+
+    /// The last unit the user saved with, else the region's usual unit.
+    private static var preferredWeightUnit: WeightUnit {
+        if let saved = UserDefaults.standard.string(forKey: "weightUnit"),
+           let unit = WeightUnit(rawValue: saved) {
+            return unit
+        }
+        return Locale.current.measurementSystem == .us ? .lbs : .kg
+    }
 
     private func triggerHaptic(_ style: HapticStyle) {
         switch style {
@@ -263,21 +327,4 @@ struct CameraTab: View {
     }
 
     private enum HapticStyle { case medium, success }
-}
-
-// MARK: - Reusable Frozen Frame View
-
-struct FrozenFrameThumb: UIViewRepresentable {
-    let frame: CVPixelBuffer
-
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.layer.contentsGravity = .resizeAspectFill
-        view.clipsToBounds = true
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        uiView.layer.contents = frame
-    }
 }

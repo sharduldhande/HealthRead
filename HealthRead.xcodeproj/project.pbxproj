@@ -473,7 +473,6 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to read your blood pressure monitor or weight scale display";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "View your recent blood pressure and weight readings";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Save blood pressure and weight readings from your devices";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save captured images of your health device readings";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -510,7 +509,6 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to read your blood pressure monitor or weight scale display";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "View your recent blood pressure and weight readings";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Save blood pressure and weight readings from your devices";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save captured images of your health device readings";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

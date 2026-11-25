@@ -5,3 +5,6 @@ HealthRead/Models/mobileclip_s0_text.mlpackage/
 *.xcworkspace/xcuserdata
 
 HealthRead/Secrets.plist
+
+# Local build output
+build/

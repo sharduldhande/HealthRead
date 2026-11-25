@@ -5,6 +5,9 @@ struct SuccessView: View {
 
     let deviceType: DeviceType
     let summary: String
+    let measuredAt: Date
+    /// False when Apple Health isn't available on this device and the reading was kept in the app only.
+    let savedToAppleHealth: Bool
     let onDone: (Int) -> Void  // passes the tab index to navigate to
 
     @State private var checkmarkScale: CGFloat = 0.3
@@ -22,17 +25,26 @@ struct SuccessView: View {
                 .font(.system(size: 80))
                 .foregroundStyle(.green)
                 .scaleEffect(checkmarkScale)
+                .accessibilityHidden(true)
 
-            Text("Saved to Health")
+            Text(savedToAppleHealth ? "Saved to Health" : "Saved in HealthRead")
                 .font(.title2)
                 .fontWeight(.bold)
+
+            if !savedToAppleHealth {
+                Text("Apple Health isn\u{2019}t available on this device, so the reading is stored in HealthRead only.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
 
             Text(summary)
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Text(Date().formatted(date: .abbreviated, time: .shortened))
+            Text(measuredAt.formatted(date: .abbreviated, time: .shortened))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 

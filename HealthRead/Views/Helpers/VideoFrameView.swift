@@ -27,12 +27,15 @@ struct VideoFrameView: View {
                     // control to flip to front/back facing camera
                     .overlay(alignment: .bottomTrailing) {
                         Button(action: toggleCamera) {
-                            Image(systemName: "arrow.triangle.2.circlepath.circle")
-                                .foregroundStyle(.blue)
-                                .frame(width: 20, height: 20)
-                                .padding(20)
+                            Image(systemName: "arrow.triangle.2.circlepath.camera")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                                .background(.black.opacity(0.45), in: Circle())
+                                .padding(12)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(backCamera ? "Switch to front camera" : "Switch to back camera")
                     }
 
             } else {

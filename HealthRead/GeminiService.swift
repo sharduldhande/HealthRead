@@ -23,16 +23,15 @@ actor GeminiService {
         self.session = URLSession(configuration: config)
     }
 
-    /// Analyze a frozen camera frame — sends to Gemini and returns structured reading data.
-    func analyze(frame: CVPixelBuffer) async -> GeminiAnalysisResult {
-        // Convert frame to JPEG base64
-        guard let base64Image = await pixelBufferToBase64JPEG(frame) else {
+    /// Analyze a captured image (camera frame or library photo) and return structured reading data.
+    func analyze(image: UIImage) async -> GeminiAnalysisResult {
+        guard let base64Image = Self.base64JPEG(image) else {
             return .error("Failed to convert image")
         }
 
         let apiKey = APIKeyProvider.geminiAPIKey
         guard !apiKey.isEmpty else {
-            return .error("Gemini API key not configured")
+            return .error("Cloud reading isn\u{2019}t set up in this build. Enter the numbers yourself instead.")
         }
 
         let urlString = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=\(apiKey)"
@@ -79,23 +78,8 @@ actor GeminiService {
 
     // MARK: - Image Conversion
 
-    private func pixelBufferToBase64JPEG(_ pixelBuffer: CVPixelBuffer) async -> String? {
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
-            return nil
-        }
-        let uiImage = UIImage(cgImage: cgImage)
-
-        // Save to photo library (must be on main thread)
-        await MainActor.run {
-            UIImageWriteToSavedPhotosAlbum(uiImage, nil, nil, nil)
-        }
-
-        guard let jpegData = uiImage.jpegData(compressionQuality: 0.8) else {
-            return nil
-        }
-        print("Gemini: Image \(cgImage.width)x\(cgImage.height), JPEG \(jpegData.count / 1024)KB")
+    private static func base64JPEG(_ image: UIImage) -> String? {
+        guard let jpegData = image.jpegData(compressionQuality: 0.8) else { return nil }
         return jpegData.base64EncodedString()
     }
 
