@@ -74,9 +74,14 @@ def _aws_identity_token():
     if _sts is None:
         region = os.environ["AWS_REGION"]
         _sts = boto3.client("sts", region_name=region, endpoint_url=f"https://sts.{region}.amazonaws.com")
-    token = _sts.get_web_identity_token(
-        Audience=[ANTHROPIC_AUDIENCE], SigningAlgorithm="RS256", DurationSeconds=300
-    )["WebIdentityToken"]
+    try:
+        token = _sts.get_web_identity_token(
+            Audience=[ANTHROPIC_AUDIENCE], SigningAlgorithm="RS256", DurationSeconds=300
+        )["WebIdentityToken"]
+    except Exception as e:  # the SDK reports provider failures as connection errors
+        code = getattr(e, "response", {}).get("Error", {}).get("Code", type(e).__name__)
+        print(json.dumps({"event": "aws_identity_token_error", "code": code}))
+        raise
     _log_token_identity(token)
     return token
 

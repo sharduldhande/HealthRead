@@ -33,8 +33,13 @@ Parameters:
     Description: Optional. wrkspc_ ID of the HealthRead workspace (needed if the rule covers several).
   MaxConcurrency:
     Type: Number
-    Default: 2
-    Description: Most requests handled at once; extra requests get HTTP 429.
+    Default: 0
+    Description: >
+      Requests handled at once (extra ones get HTTP 429). 0 = no reservation. Reserving needs an
+      account concurrency limit above 10; new accounts start at 10, which already caps this function.
+
+Conditions:
+  ReserveConcurrency: !Not [!Equals [!Ref MaxConcurrency, 0]]
 
 Resources:
   ReadingFunctionRole:
@@ -68,7 +73,7 @@ Resources:
       Architectures: [arm64]
       MemorySize: 256
       Timeout: 30
-      ReservedConcurrentExecutions: !Ref MaxConcurrency
+      ReservedConcurrentExecutions: !If [ReserveConcurrency, !Ref MaxConcurrency, !Ref AWS::NoValue]
       Role: !GetAtt ReadingFunctionRole.Arn
       Environment:
         Variables:
