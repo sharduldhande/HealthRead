@@ -59,8 +59,18 @@ enum Analytics {
             "$os": "iOS",
             "$os_version": UIDevice.current.systemVersion,
             "$device_model": model,
+            // Debug builds (Xcode installs, Simulator) are excluded from dashboards as test traffic.
+            "debug_build": isDebugBuild,
         ]
     }()
+
+    private static var isDebugBuild: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
 
     /// Fire-and-forget. Does nothing when disabled or not configured.
     static func capture(_ event: String, _ properties: [String: Any] = [:], force: Bool = false) {

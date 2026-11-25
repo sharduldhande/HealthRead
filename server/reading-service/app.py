@@ -237,14 +237,17 @@ def _authorize(body, headers):
 def _read(body, headers, install_id):
     started = time.monotonic()
 
+    device_id, reason = _authorize(body, headers)
+
     def report(outcome, status, payload, **extra):
         analytics.capture("reading_service_request", install_id, {
             "outcome": outcome, "status": status, "model": MODEL,
-            "ms": int((time.monotonic() - started) * 1000), **extra,
+            "ms": int((time.monotonic() - started) * 1000),
+            # Test-token requests are excluded from dashboards as test traffic.
+            "test_request": device_id == "dev-bypass", **extra,
         })
         return _reply(status, payload)
 
-    device_id, reason = _authorize(body, headers)
     if device_id is None:
         print(json.dumps({"event": "read_rejected", "reason": reason}))
         return report("unauthorized", 401, {"error": "attest_required"}, reason=reason.split(":")[0])
