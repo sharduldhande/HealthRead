@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  HealthRead reading service. One public HTTPS endpoint (Lambda Function URL) that reads
+  a photo of a blood pressure monitor or scale with Claude. The Anthropic API key is kept
+  in Secrets Manager. Spend is capped by low concurrency here and by the spend limit on
+  the Anthropic workspace that owns the key.
+
+Parameters:
+  Model:
+    Type: String
+    Default: claude-opus-5-5
+    Description: Claude model ID used for readings.
+  Effort:
+    Type: String
+    Default: low
+    AllowedValues: [low, medium, high]
+  MaxConcurrency:
+    Type: Number
+    Default: 2
+    Description: Most requests handled at once; extra requests get HTTP 429.
+
+Resources:
+  AnthropicKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: healthread/anthropic-api-key
+      Description: Anthropic API key for the HealthRead reading service. Set its value yourself after deploy.
+      SecretString: "REPLACE_WITH_KEY"
+
+  ReadingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: healthread-reading-service
+      CodeUri: .
+      Handler: app.handler
+      Runtime: python3.13
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 30
+      ReservedConcurrentExecutions: !Ref MaxConcurrency
+      Environment:
+        Variables:
+          MODEL: !Ref Model
+          EFFORT: !Ref Effort
+          ANTHROPIC_KEY_SECRET_ID: !Ref AnthropicKeySecret
+      Policies:
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Ref AnthropicKeySecret
+      FunctionUrlConfig:
+        AuthType: NONE
+      LoggingConfig:
+        LogFormat: Text
+
+  ReadingFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/healthread-reading-service
+      RetentionInDays: 14
+
+Outputs:
+  ServiceURL:
+    Description: Put this in ClaudeReader.serviceURL in the iOS app.
+    Value: !GetAtt ReadingFunctionUrl.FunctionUrl
+  SecretName:
+    Description: Set the Anthropic API key here (console or aws secretsmanager put-secret-value).
+    Value: healthread/anthropic-api-key

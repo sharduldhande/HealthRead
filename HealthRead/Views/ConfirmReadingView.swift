@@ -157,13 +157,18 @@ struct ConfirmReadingView: View {
     private var sourceNote: some View {
         Label {
             switch source {
-            case .ai:
-                Text("Read from the photo by AI. Check each number against the display.")
+            case .reader(let kind):
+                Text("Read by \(kind.displayName). Check each number against the display.")
             case .manual:
                 Text(image == nil ? "Type the numbers shown on your device." : "Type the numbers from the photo.")
             }
         } icon: {
-            Image(systemName: source == .ai ? "sparkles" : "keyboard")
+            switch source {
+            case .reader(let kind):
+                Image(systemName: kind.runsOnDevice ? "iphone" : "cloud")
+            case .manual:
+                Image(systemName: "keyboard")
+            }
         }
         .font(.subheadline)
         .foregroundStyle(.secondary)

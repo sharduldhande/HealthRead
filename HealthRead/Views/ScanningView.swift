@@ -25,7 +25,8 @@ struct ScanningView: View {
 
     let camera: CameraController
     @Binding var backCamera: Bool
-    let onFrameCaptured: (CVPixelBuffer) -> Void
+    /// The captured frame, plus the device MobileCLIP thinks is in view (a hint for text recognition).
+    let onFrameCaptured: (CVPixelBuffer, DeviceType?) -> Void
     let onPhotoPicked: (UIImage) -> Void
     let onEnterManually: (DeviceType) -> Void
 
@@ -126,7 +127,7 @@ struct ScanningView: View {
             guard let frame = latestFrame else { return }
             let generator = UIImpactFeedbackGenerator(style: .medium)
             generator.impactOccurred()
-            onFrameCaptured(frame)
+            onFrameCaptured(frame, detectedDevice)
         } label: {
             ZStack {
                 Circle()

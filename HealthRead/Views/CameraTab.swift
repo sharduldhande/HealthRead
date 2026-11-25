@@ -10,8 +10,10 @@ struct CameraTab: View {
     @Binding var backCamera: Bool
     @Binding var selectedTab: Int
 
-    // Gemini service
-    @State private var geminiService = GeminiService()
+    // Readers (Claude, Apple models, text recognition), tried in order for the chosen mode
+    @State private var coordinator = ReadingCoordinator()
+    @AppStorage(ReadingMode.storageKey) private var readingModeRaw = ReadingMode.cloudAssisted.rawValue
+    private var readingMode: ReadingMode { ReadingMode(rawValue: readingModeRaw) ?? .cloudAssisted }
 
     // App state
     @State private var appState: AppState = .scanning
@@ -40,6 +42,7 @@ struct CameraTab: View {
     @State private var showSaveError = false
     /// Bumped on every new capture so a late result from a cancelled analysis is ignored.
     @State private var analysisID = UUID()
+    @State private var showSettings = false
 
     var body: some View {
         ZStack {
@@ -48,6 +51,18 @@ struct CameraTab: View {
             switch appState {
             case .scanning:
                 scanningLayer
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.title3)
+                                .foregroundStyle(.white)
+                                .frame(width: 44, height: 44)
+                        }
+                        .padding(.trailing, 12)
+                        .accessibilityLabel("Settings")
+                    }
                     .environment(\.colorScheme, .dark)
                     .transition(.opacity)
 
@@ -87,6 +102,9 @@ struct CameraTab: View {
         } message: {
             Text(saveErrorMessage ?? "Something went wrong. Your reading was not saved.")
         }
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
+        }
         .onAppear {
             weightUnit = Self.preferredWeightUnit
         }
@@ -98,13 +116,13 @@ struct CameraTab: View {
         ScanningView(
             camera: camera,
             backCamera: $backCamera,
-            onFrameCaptured: { frame in
+            onFrameCaptured: { frame, hint in
                 triggerHaptic(.medium)
                 guard let image = UIImage.from(pixelBuffer: frame) else { return }
-                beginAnalysis(of: image)
+                beginAnalysis(of: image, hint: hint)
             },
             onPhotoPicked: { image in
-                beginAnalysis(of: image.normalizedForReading())
+                beginAnalysis(of: image.normalizedForReading(), hint: nil)
             },
             onEnterManually: { device in
                 startManualEntry(device, keepingImage: false)
@@ -143,7 +161,9 @@ struct CameraTab: View {
                 }
                 .font(.title3)
 
-                Text("You\u{2019}ll check the numbers before anything is saved.")
+                Text(readingMode == .onDevice
+                     ? "Reading on this iPhone. You\u{2019}ll check the numbers before anything is saved."
+                     : "You\u{2019}ll check the numbers before anything is saved.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -193,17 +213,24 @@ struct CameraTab: View {
 
     // MARK: - Analysis
 
-    private func beginAnalysis(of image: UIImage) {
+    private func beginAnalysis(of image: UIImage, hint: DeviceType?) {
         capturedImage = image
         measuredAt = Date()
         let id = UUID()
         analysisID = id
         withAnimation { appState = .processing }
-        Task { await performAnalysis(image: image, id: id) }
+        Task { await performAnalysis(image: image, hint: hint, id: id) }
     }
 
-    private func performAnalysis(image: UIImage, id: UUID) async {
-        let result = await geminiService.analyze(image: image)
+    private func performAnalysis(image: UIImage, hint: DeviceType?, id: UUID) async {
+        guard let cgImage = image.cgImage else {
+            await MainActor.run {
+                readErrorMessage = "Couldn\u{2019}t prepare the photo."
+                showReadError = true
+            }
+            return
+        }
+        let (result, reader) = await coordinator.read(cgImage, mode: readingMode, hint: hint)
 
         await MainActor.run {
             // Ignore results for an analysis the user cancelled or replaced.
@@ -214,13 +241,13 @@ struct CameraTab: View {
                 systolic = String(reading.systolic)
                 diastolic = String(reading.diastolic)
                 pulse = reading.pulse.map { String($0) } ?? ""
-                readingSource = .ai
+                readingSource = reader.map(ReadingSource.reader) ?? .manual
                 withAnimation { appState = .confirm(.bloodPressure) }
 
             case .weight(let reading):
                 weight = String(format: "%.1f", reading.weight)
                 weightUnit = reading.unit
-                readingSource = .ai
+                readingSource = reader.map(ReadingSource.reader) ?? .manual
                 withAnimation { appState = .confirm(.weightScale) }
 
             case .noDeviceDetected:

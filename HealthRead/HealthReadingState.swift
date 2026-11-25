@@ -4,7 +4,7 @@ import CoreVideo
 /// The app's state machine — drives the entire UI with zero NavigationStack overhead.
 enum AppState: Equatable {
     case scanning
-    case processing         // Gemini is analyzing the frozen frame
+    case processing         // a reader is analyzing the captured photo
     case confirm(DeviceType)
     case saved(DeviceType)
 
@@ -41,8 +41,8 @@ enum DeviceType: String, Equatable {
 
 /// Where the numbers on the confirm screen came from.
 enum ReadingSource: Equatable {
-    /// Read from the photo by an AI model; the user must check them.
-    case ai
+    /// Read from the photo by one of the readers; the user must check them.
+    case reader(ReaderKind)
     /// Typed in by the user.
     case manual
 }

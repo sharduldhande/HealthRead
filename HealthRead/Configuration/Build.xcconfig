@@ -6,6 +6,3 @@
 // they are frequently downloaded and don't have a development team set.
 DISAMBIGUATOR=${DEVELOPMENT_TEAM}
 
-// Gemini 2.5 Flash-Lite API Key
-// Get your key at https://aistudio.google.com/apikey
-GEMINI_API_KEY =

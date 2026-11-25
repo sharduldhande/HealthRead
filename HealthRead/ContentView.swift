@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var camera = CameraController()
     @State private var healthKit = HealthKitManager()
     @State private var selectedTab = 0
+    @AppStorage(ReadingMode.chosenKey) private var didChooseReadingMode = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -35,9 +36,15 @@ struct ContentView: View {
                 }
                 .tag(2)
         }
-        .task {
+        // Ask for camera and Apple Health access only after onboarding, so the
+        // system prompts come with context.
+        .task(id: didChooseReadingMode) {
+            guard didChooseReadingMode else { return }
             camera.start()
-            await healthKit.requestAuthorization()
+            _ = await healthKit.requestAuthorization()
+        }
+        .fullScreenCover(isPresented: .constant(!didChooseReadingMode)) {
+            OnboardingView()
         }
     }
 }
