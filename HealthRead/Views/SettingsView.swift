@@ -47,7 +47,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Text("Readings are saved to Apple Health on your iPhone. In Cloud Assisted mode, one photo per reading is sent over HTTPS to HealthRead\u{2019}s reader, which asks Claude (Anthropic) to read it and keeps no copy. Fully On-Device mode sends nothing.")
+                    Text("Readings are saved to Apple Health on your iPhone. In Cloud Assisted mode, a photo may be read by Apple\u{2019}s Private Cloud Compute (Apple says it keeps no data) and, if needed, sent over HTTPS to HealthRead\u{2019}s reader, which asks Claude (Anthropic) to read it and keeps no copy. The confirm screen always says which one read it. Fully On-Device mode sends nothing.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } header: {

@@ -45,7 +45,7 @@ enum ReaderKind: String, CaseIterable, Identifiable {
 enum ReadingMode: String, CaseIterable, Identifiable {
     /// Photos never leave the phone.
     case onDevice
-    /// Try a cloud reader first, then fall back to on-device readers.
+    /// Apple's models first (Private Cloud Compute, then on-device), then Claude, then text recognition.
     case cloudAssisted
 
     var id: String { rawValue }
@@ -61,7 +61,7 @@ enum ReadingMode: String, CaseIterable, Identifiable {
     var readers: [ReaderKind] {
         switch self {
         case .onDevice: return [.appleOnDevice, .textRecognition]
-        case .cloudAssisted: return [.claude, .applePrivateCloud, .appleOnDevice, .textRecognition]
+        case .cloudAssisted: return [.applePrivateCloud, .appleOnDevice, .claude, .textRecognition]
         }
     }
 
@@ -121,8 +121,9 @@ struct ModelReading: Decodable {
 // MARK: - Coordinator
 
 /// Tries the readers for the chosen mode in order and returns the first usable result.
-/// A reader that is unavailable or errors (offline, no credit, unsupported phone) is skipped;
-/// "no device in the photo" is trusted and returned as is.
+/// A reader that is unavailable or errors (offline, no credit, unsupported phone) is skipped.
+/// "No device in the photo" ends the attempt only when Claude or the last reader says it;
+/// from Apple's models it moves on, since their accuracy on these displays is unproven.
 actor ReadingCoordinator {
 
     private let claude = ClaudeReader()
@@ -130,6 +131,7 @@ actor ReadingCoordinator {
 
     func read(_ image: CGImage, mode: ReadingMode, hint: DeviceType?) async -> (ReadingResult, ReaderKind?) {
         var lastError = "No reader is available on this iPhone."
+        var sawNoDevice: ReaderKind?
         for kind in mode.readers {
             let result: ReadingResult
             switch kind {
@@ -145,7 +147,15 @@ actor ReadingCoordinator {
                 lastError = message
                 continue
             }
+            if case .noDeviceDetected = result, kind == .applePrivateCloud || kind == .appleOnDevice {
+                print("Reader \(kind.rawValue) saw no device; asking the next reader")
+                sawNoDevice = kind
+                continue
+            }
             return (result, kind)
+        }
+        if let sawNoDevice {
+            return (.noDeviceDetected, sawNoDevice)
         }
         return (.error(lastError), nil)
     }

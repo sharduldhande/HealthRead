@@ -109,7 +109,7 @@ struct ReadingModeCard: View {
         case .onDevice:
             return "Photos never leave your iPhone. On this iPhone, readings use \(onDeviceReader)."
         case .cloudAssisted:
-            return "Most accurate. One photo per reading goes to HealthRead\u{2019}s reader (Claude by Anthropic) and isn\u{2019}t stored. If it\u{2019}s unavailable, HealthRead reads on your iPhone instead."
+            return "Uses Apple Intelligence first (Apple\u{2019}s Private Cloud Compute, then your iPhone) where supported. Otherwise, or if Apple\u{2019}s models can\u{2019}t read it, one photo goes to HealthRead\u{2019}s reader (Claude by Anthropic). Photos aren\u{2019}t stored."
         }
     }
 }
