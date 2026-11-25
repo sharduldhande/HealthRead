@@ -3,8 +3,11 @@
 An AWS Lambda function (behind a Function URL) that takes one JPEG of a blood
 pressure monitor or bathroom scale and returns the numbers as JSON, read by Claude.
 
-The Anthropic API key lives in AWS Secrets Manager and never leaves AWS; the iOS app
-holds no key. Photos are not stored or logged: only token counts and timing are logged.
+No Anthropic API key exists for this service. It signs in with Workload Identity
+Federation: the function's AWS role asks AWS STS for a short-lived token (audience
+https://api.anthropic.com), and the Anthropic SDK trades it for a short-lived access
+token under a federation rule in the Claude Console. The iOS app holds no key either.
+Photos are not stored or logged: only token counts and timing are logged.
 
 Request:  POST {"image_jpeg_base64": "<base64 JPEG>"}
 Response: 200 {"device_type": "blood_pressure" | "weight_scale" | "none",
@@ -21,10 +24,11 @@ import time
 
 import anthropic
 import boto3
+from anthropic.lib.credentials import WorkloadIdentityCredentials
 
 MODEL = os.environ.get("MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("EFFORT", "low")
-SECRET_ID = os.environ["ANTHROPIC_KEY_SECRET_ID"]
+ANTHROPIC_AUDIENCE = "https://api.anthropic.com"
 MAX_IMAGE_BYTES = 1_500_000  # the app sends about 100-400 KB
 
 INSTRUCTIONS = """You read the display of a home health device in a photo and report the numbers exactly as shown.
@@ -58,14 +62,59 @@ READING_SCHEMA = {
 }
 
 _client = None
+_sts = None
+
+
+def _aws_identity_token():
+    """A fresh AWS-signed JWT for this function's role (valid 5 minutes).
+
+    GetWebIdentityToken isn't served by the STS global endpoint, so use the regional one.
+    """
+    global _sts
+    if _sts is None:
+        region = os.environ["AWS_REGION"]
+        _sts = boto3.client("sts", region_name=region, endpoint_url=f"https://sts.{region}.amazonaws.com")
+    token = _sts.get_web_identity_token(
+        Audience=[ANTHROPIC_AUDIENCE], SigningAlgorithm="RS256", DurationSeconds=300
+    )["WebIdentityToken"]
+    _log_token_identity(token)
+    return token
+
+
+_logged_identity = False
+
+
+def _log_token_identity(token):
+    """Logs the token's issuer, subject and audience once per container (never the token).
+
+    These are what the federation rule in the Claude Console must match.
+    """
+    global _logged_identity
+    if _logged_identity:
+        return
+    _logged_identity = True
+    try:
+        payload = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        print(json.dumps({"event": "aws_identity", "iss": claims.get("iss"),
+                          "sub": claims.get("sub"), "aud": claims.get("aud")}))
+    except (IndexError, ValueError):
+        pass
 
 
 def _anthropic_client():
-    """Created once per Lambda container; the key is read from Secrets Manager, never logged."""
+    """Created once per Lambda container. The SDK caches the Anthropic access token and
+    calls `_aws_identity_token` again when it needs a new one."""
     global _client
     if _client is None:
-        secret = boto3.client("secretsmanager").get_secret_value(SecretId=SECRET_ID)["SecretString"]
-        _client = anthropic.Anthropic(api_key=secret.strip(), max_retries=1, timeout=20.0)
+        credentials = WorkloadIdentityCredentials(
+            identity_token_provider=_aws_identity_token,
+            federation_rule_id=os.environ["ANTHROPIC_FEDERATION_RULE_ID"],
+            organization_id=os.environ["ANTHROPIC_ORGANIZATION_ID"],
+            service_account_id=os.environ.get("ANTHROPIC_SERVICE_ACCOUNT_ID") or None,
+            workspace_id=os.environ.get("ANTHROPIC_WORKSPACE_ID") or None,
+        )
+        _client = anthropic.Anthropic(credentials=credentials, max_retries=1, timeout=20.0)
     return _client
 
 
@@ -136,6 +185,10 @@ def handler(event, context):
         return _reply(502, {"error": "Reader unavailable."})
     except anthropic.APIConnectionError:
         print(json.dumps({"event": "anthropic_connection_error"}))
+        return _reply(502, {"error": "Reader unavailable."})
+    except anthropic.AnthropicError as e:
+        # e.g. the federation rule doesn't match this function's identity yet
+        print(json.dumps({"event": "anthropic_auth_error", "type": type(e).__name__}))
         return _reply(502, {"error": "Reader unavailable."})
 
     usage = response.usage

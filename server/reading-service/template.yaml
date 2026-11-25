@@ -2,9 +2,9 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   HealthRead reading service. One public HTTPS endpoint (Lambda Function URL) that reads
-  a photo of a blood pressure monitor or scale with Claude. The Anthropic API key is kept
-  in Secrets Manager. Spend is capped by low concurrency here and by the spend limit on
-  the Anthropic workspace that owns the key.
+  a photo of a blood pressure monitor or scale with Claude. No API key: the function signs
+  in to Anthropic with Workload Identity Federation (AWS STS web identity token).
+  Spend is capped by low concurrency here and by the spend limit on the Anthropic workspace.
 
 Parameters:
   Model:
@@ -15,18 +15,48 @@ Parameters:
     Type: String
     Default: low
     AllowedValues: [low, medium, high]
+  AnthropicOrganizationId:
+    Type: String
+    Default: ""
+    Description: Claude Console organization ID (UUID). Not a secret; passed at deploy time.
+  AnthropicFederationRuleId:
+    Type: String
+    Default: ""
+    Description: ID of the federation rule that matches this function's AWS role.
+  AnthropicServiceAccountId:
+    Type: String
+    Default: ""
+    Description: Optional. Service account the rule targets.
+  AnthropicWorkspaceId:
+    Type: String
+    Default: ""
+    Description: Optional. wrkspc_ ID of the HealthRead workspace (needed if the rule covers several).
   MaxConcurrency:
     Type: Number
     Default: 2
     Description: Most requests handled at once; extra requests get HTTP 429.
 
 Resources:
-  AnthropicKeySecret:
-    Type: AWS::SecretsManager::Secret
+  ReadingFunctionRole:
+    Type: AWS::IAM::Role
     Properties:
-      Name: healthread/anthropic-api-key
-      Description: Anthropic API key for the HealthRead reading service. Set its value yourself after deploy.
-      SecretString: "REPLACE_WITH_KEY"
+      RoleName: healthread-reading-service
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: anthropic-web-identity-token
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:GetWebIdentityToken
+                Resource: "*"
 
   ReadingFunction:
     Type: AWS::Serverless::Function
@@ -39,14 +69,15 @@ Resources:
       MemorySize: 256
       Timeout: 30
       ReservedConcurrentExecutions: !Ref MaxConcurrency
+      Role: !GetAtt ReadingFunctionRole.Arn
       Environment:
         Variables:
           MODEL: !Ref Model
           EFFORT: !Ref Effort
-          ANTHROPIC_KEY_SECRET_ID: !Ref AnthropicKeySecret
-      Policies:
-        - AWSSecretsManagerGetSecretValuePolicy:
-            SecretArn: !Ref AnthropicKeySecret
+          ANTHROPIC_ORGANIZATION_ID: !Ref AnthropicOrganizationId
+          ANTHROPIC_FEDERATION_RULE_ID: !Ref AnthropicFederationRuleId
+          ANTHROPIC_SERVICE_ACCOUNT_ID: !Ref AnthropicServiceAccountId
+          ANTHROPIC_WORKSPACE_ID: !Ref AnthropicWorkspaceId
       FunctionUrlConfig:
         AuthType: NONE
       LoggingConfig:
@@ -62,6 +93,6 @@ Outputs:
   ServiceURL:
     Description: Put this in ClaudeReader.serviceURL in the iOS app.
     Value: !GetAtt ReadingFunctionUrl.FunctionUrl
-  SecretName:
-    Description: Set the Anthropic API key here (console or aws secretsmanager put-secret-value).
-    Value: healthread/anthropic-api-key
+  RoleArn:
+    Description: The AWS identity the federation rule in the Claude Console should match.
+    Value: !GetAtt ReadingFunctionRole.Arn

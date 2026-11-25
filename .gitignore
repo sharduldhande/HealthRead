@@ -10,3 +10,4 @@ HealthRead/Secrets.plist
 build/
 __pycache__/
 .aws-sam/
+samconfig.toml
