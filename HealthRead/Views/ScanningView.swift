@@ -40,6 +40,7 @@ struct ScanningView: View {
     @State private var pulseAnimation = false
     @State private var latestFrame: CVPixelBuffer?
     @State private var pickedPhoto: PhotosPickerItem?
+    @State private var showManualEntryChoice = false
     /// Zoom when the current pinch began.
     @State private var pinchStartZoom: CGFloat?
     /// The last half second of glare-scored frames; the shutter uses the cleanest.
@@ -240,14 +241,21 @@ struct ScanningView: View {
         .accessibilityHint("Reads a photo of your monitor or scale from your library")
     }
 
+    /// A modal choice instead of a pop-up Menu: the Menu opened on top of the shutter and
+    /// taps on its items fell through to the shutter underneath.
     private var manualEntryButton: some View {
-        Menu {
-            Button("Blood Pressure", systemImage: "heart.fill") { onEnterManually(.bloodPressure) }
-            Button("Weight", systemImage: "scalemass.fill") { onEnterManually(.weightScale) }
+        Button {
+            showManualEntryChoice = true
         } label: {
             secondaryButtonLabel("Type It", systemImage: "keyboard")
         }
+        .buttonStyle(.plain)
         .accessibilityLabel("Enter a reading by hand")
+        .confirmationDialog("Type in a reading", isPresented: $showManualEntryChoice, titleVisibility: .visible) {
+            Button("Blood Pressure") { onEnterManually(.bloodPressure) }
+            Button("Weight") { onEnterManually(.weightScale) }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     private func secondaryButtonLabel(_ title: String, systemImage: String) -> some View {

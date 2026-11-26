@@ -24,6 +24,10 @@ enum ReadingResult {
 
 /// The reader that produced a set of numbers. Shown on the confirm screen.
 enum ReaderKind: String, CaseIterable, Identifiable {
+    /// The step that calls HealthRead's reading service. The service answers with Gemini, or
+    /// with Claude when Gemini is rate limited, and the result is credited to `.gemini` or `.claude`.
+    case cloud
+    case gemini
     case claude
     case applePrivateCloud
     case appleOnDevice
@@ -33,6 +37,8 @@ enum ReaderKind: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .cloud: return "HealthRead\u{2019}s cloud reader (Gemini by Google; Claude by Anthropic when busy)"
+        case .gemini: return "Gemini (Google)"
         case .claude: return "Claude (Anthropic)"
         case .applePrivateCloud: return "Apple Private Cloud Compute"
         case .appleOnDevice: return "Apple Intelligence (on device)"
@@ -49,7 +55,7 @@ enum ReaderKind: String, CaseIterable, Identifiable {
 enum ReadingMode: String, CaseIterable, Identifiable {
     /// Photos never leave the phone.
     case onDevice
-    /// Apple's models first (Private Cloud Compute, then on-device), then Claude, then text recognition.
+    /// Apple's models first (Private Cloud Compute, then on-device), then HealthRead's cloud reader, then text recognition.
     case cloudAssisted
 
     var id: String { rawValue }
@@ -65,7 +71,7 @@ enum ReadingMode: String, CaseIterable, Identifiable {
     var readers: [ReaderKind] {
         switch self {
         case .onDevice: return [.appleOnDevice, .textRecognition]
-        case .cloudAssisted: return [.applePrivateCloud, .appleOnDevice, .claude, .textRecognition]
+        case .cloudAssisted: return [.applePrivateCloud, .appleOnDevice, .cloud, .textRecognition]
         }
     }
 
@@ -96,7 +102,7 @@ enum ReadingPrompt {
     """
 }
 
-/// Model output in the shared JSON shape. Claude's service returns this shape directly.
+/// Model output in the shared JSON shape. HealthRead's reading service returns this shape directly.
 struct ModelReading: Decodable {
     let device_type: String
     let systolic: Int?
@@ -106,6 +112,10 @@ struct ModelReading: Decodable {
     let weight_unit: String?
     /// Values the model read but isn't sure of. Analytics only (field names, never numbers).
     let unclear: [String]?
+    /// Which model the reading service used: "gemini" or "claude".
+    let read_by: String?
+
+    var readBy: ReaderKind { read_by == "claude" ? .claude : .gemini }
 
     var result: ReadingResult {
         switch device_type {
@@ -129,11 +139,11 @@ struct ModelReading: Decodable {
 
 /// Tries the readers for the chosen mode in order and returns the first usable result.
 /// A reader that is unavailable or errors (offline, no credit, unsupported phone) is skipped.
-/// "No device in the photo" ends the attempt only when Claude or the last reader says it;
+/// "No device in the photo" ends the attempt only when the cloud reader or the last reader says it;
 /// from Apple's models it moves on, since their accuracy on these displays is unproven.
 actor ReadingCoordinator {
 
-    private let claude = ClaudeReader()
+    private let cloud = CloudReader()
     private let textRecognition = TextRecognitionReader()
 
     /// One reader's turn, for analytics: which reader, how it ended, how long it took.
@@ -158,9 +168,12 @@ actor ReadingCoordinator {
         for kind in mode.readers {
             let started = Date()
             let result: ReadingResult
+            var kind = kind
             switch kind {
-            case .claude:
-                result = await claude.read(image)
+            case .cloud, .gemini, .claude:
+                let answer = await cloud.read(image)
+                result = answer.result
+                kind = answer.readBy ?? .cloud
             case .applePrivateCloud, .appleOnDevice:
                 result = await AppleModelReader.read(image, privateCloud: kind == .applePrivateCloud)
             case .textRecognition:
@@ -194,8 +207,8 @@ actor ReadingCoordinator {
     /// For Settings: which readers can run right now on this phone.
     nonisolated static func availability(of kind: ReaderKind) -> String? {
         switch kind {
-        case .claude:
-            return ClaudeReader.isConfigured ? nil : "Not set up in this build"
+        case .cloud, .gemini, .claude:
+            return CloudReader.isConfigured ? nil : "Not set up in this build"
         case .applePrivateCloud, .appleOnDevice:
             return AppleModelReader.unavailableReason(privateCloud: kind == .applePrivateCloud)
         case .textRecognition:
@@ -204,12 +217,12 @@ actor ReadingCoordinator {
     }
 }
 
-// MARK: - Claude (through HealthRead's AWS function)
+// MARK: - Cloud reader (HealthRead's AWS function: Gemini, or Claude when Gemini is busy)
 
 /// Sends one JPEG to HealthRead's reading service (an AWS function that signs in to Claude
 /// with workload identity federation). The app holds no API key; each request is signed
 /// with an App Attest key so only genuine installs can use the service.
-struct ClaudeReader {
+struct CloudReader {
 
     /// Public HTTPS endpoint of the reading service (an AWS Lambda function URL).
     /// Not a secret: it only accepts a photo and returns the reading JSON.
@@ -236,7 +249,14 @@ struct ClaudeReader {
         _ = try? await session.data(from: baseURL.appending(path: "warm"))
     }
 
-    func read(_ image: CGImage) async -> ReadingResult {
+    /// The reading, and which model the service used (nil when it didn't answer).
+    func read(_ image: CGImage) async -> (result: ReadingResult, readBy: ReaderKind?) {
+        var readBy: ReaderKind?
+        let result = await readOnce(image, readBy: &readBy)
+        return (result, readBy)
+    }
+
+    private func readOnce(_ image: CGImage, readBy: inout ReaderKind?) async -> ReadingResult {
         guard let baseURL = Self.serviceURL else {
             return .error("Cloud reading isn\u{2019}t set up in this build.", category: "not_configured")
         }
@@ -278,13 +298,15 @@ struct ClaudeReader {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 switch status {
                 case 200:
-                    return try JSONDecoder().decode(ModelReading.self, from: data).result
+                    let reading = try JSONDecoder().decode(ModelReading.self, from: data)
+                    readBy = reading.readBy
+                    return reading.result
                 case 401:
                     await AppAttestClient.shared.reset()
                     if attempt == 0 { continue }
                     return .error("The reading service didn\u{2019}t accept this copy of HealthRead.", category: "attest_rejected")
                 case 422:
-                    return .error("Claude couldn\u{2019}t read this photo.", category: "no_reading")
+                    return .error("The cloud reader couldn\u{2019}t read this photo.", category: "no_reading")
                 case 429:
                     return .error("Cloud reading has hit today\u{2019}s limit. Reading on this iPhone instead.", category: "rate_limited")
                 default:

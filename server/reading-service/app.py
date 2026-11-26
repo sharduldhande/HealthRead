@@ -1,7 +1,8 @@
 """HealthRead reading service.
 
 An AWS Lambda function (behind a Function URL) that takes one JPEG of a blood
-pressure monitor or bathroom scale and returns the numbers as JSON, read by Claude.
+pressure monitor or bathroom scale and returns the numbers as JSON. By default it is read
+by Google's Gemini Decision 1 (gemini.py); if Gemini is rate limited, Claude reads it.
 
 No Anthropic API key exists for this service. It signs in with Workload Identity
 Federation: the function's AWS role asks AWS STS for a short-lived token (audience
@@ -19,7 +20,8 @@ Endpoints (all POST):
               X-AppAttest-Assertion (assertion over SHA256 of the exact request body)
      200 {"device_type": "blood_pressure" | "weight_scale" | "none",
           "systolic": int|null, "diastolic": int|null, "pulse": int|null,
-          "weight_value": number|null, "weight_unit": "kg"|"lbs"|null}
+          "weight_value": number|null, "weight_unit": "kg"|"lbs"|null,
+          "unclear": [field names], "read_by": "gemini" | "claude"}
      401 {"error": "attest_required"}   the app should attest (again) and retry once
      429 {"error": "limit", "limit": "device" | "global"}
 """
@@ -36,10 +38,13 @@ import boto3
 from anthropic.lib.credentials import WorkloadIdentityCredentials
 
 import analytics
+import gemini
 import store
 from appattest import AttestationError, verify_assertion, verify_attestation
 
-MODEL = os.environ.get("MODEL", "claude-opus-5-5")
+MODEL = os.environ.get("MODEL", gemini.MODEL)
+# Reads the photo when Gemini answers 429 (rate limited). Sonnet had no wrong values in the bake-off.
+FALLBACK_MODEL = os.environ.get("FALLBACK_MODEL", "claude-sonnet-5-5")
 EFFORT = os.environ.get("EFFORT", "low")
 ANTHROPIC_AUDIENCE = "https://api.anthropic.com"
 MAX_IMAGE_BYTES = 1_500_000  # the app sends about 100-400 KB
@@ -54,6 +59,7 @@ PRICES_PER_MTOK = {
     "claude-haiku-5-5": (0.10, 0.50),
     "claude-sonnet-5-5": (2.00, 10.00),
     "claude-opus-5-5": (4.00, 20.00),
+    gemini.MODEL: (0.10, 0.0),
 }
 
 
@@ -265,10 +271,12 @@ def _read(body, headers, install_id):
     model = MODEL
     if device_id == "dev-bypass" and headers.get("x-healthread-model") in PRICES_PER_MTOK:
         model = headers["x-healthread-model"]
+    fallback_reason = None
 
     def report(outcome, status, payload, **extra):
         analytics.capture("reading_service_request", install_id, {
             "outcome": outcome, "status": status, "model": model,
+            "fallback_reason": fallback_reason,
             "ms": int((time.monotonic() - started) * 1000),
             # Test-token requests are excluded from dashboards as test traffic.
             "test_request": device_id == "dev-bypass", **extra,
@@ -288,6 +296,27 @@ def _read(body, headers, install_id):
     if limit_hit:
         print(json.dumps({"event": "limit_hit", "limit": limit_hit}))
         return report("rate_limited", 429, {"error": "limit", "limit": limit_hit}, limit=limit_hit)
+
+    if model == gemini.MODEL:
+        try:
+            result = gemini.read(base64.standard_b64encode(jpeg).decode("ascii"))
+        except gemini.RateLimited:
+            print(json.dumps({"event": "gemini_rate_limited"}))
+            fallback_reason = "gemini_rate_limited"
+            model = FALLBACK_MODEL  # read this photo with Claude instead
+        except gemini.ReaderError as e:
+            print(json.dumps({"event": "gemini_error", "status": e.status, "message": str(e)}))
+            return report("gemini_error", 502, {"error": "Reader unavailable."}, reader_status=e.status)
+        else:
+            reading = {**result["reading"], "read_by": "gemini"}
+            print(json.dumps({"event": "read", "model": model, "input_tokens": result["input_tokens"],
+                              "cost_usd": result["cost_usd"], "reader_ms": result["ms"]}))
+            return report("ok", 200, reading, device_type=reading["device_type"],
+                          unclear=reading["unclear"], unclear_count=len(reading["unclear"]),
+                          missing=[f for f in ("systolic", "diastolic")
+                                   if reading["device_type"] == "blood_pressure" and reading.get(f) is None],
+                          input_tokens=result["input_tokens"], output_tokens=0,
+                          cost_usd=result["cost_usd"], reader_ms=result["ms"])
 
     try:
         response = _anthropic_client().beta.messages.create(
@@ -353,5 +382,6 @@ def _read(body, headers, install_id):
     unclear = [f for f in reading.get("unclear") or [] if isinstance(f, str)]
     missing = [f for f in ("systolic", "diastolic") if reading.get("device_type") == "blood_pressure"
                and reading.get(f) is None]
+    reading["read_by"] = "claude"
     return report("ok", 200, reading, device_type=reading.get("device_type"),
                   unclear=unclear, unclear_count=len(unclear), missing=missing, **tokens)

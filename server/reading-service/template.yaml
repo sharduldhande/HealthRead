@@ -2,15 +2,24 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
   HealthRead reading service. One public HTTPS endpoint (Lambda Function URL) that reads
-  a photo of a blood pressure monitor or scale with Claude. No API key: the function signs
-  in to Anthropic with Workload Identity Federation (AWS STS web identity token).
+  a photo of a blood pressure monitor or scale with Google's Gemini Decision 1, or with
+  Claude when Gemini is rate limited. The Gemini key is in Secrets Manager; Claude needs no
+  key (Workload Identity Federation with an AWS STS web identity token).
   Spend is capped by low concurrency here and by the spend limit on the Anthropic workspace.
 
 Parameters:
   Model:
     Type: String
-    Default: claude-haiku-5-5
-    Description: Claude model ID used for readings.
+    Default: gemini-decision-1
+    Description: Reader model ID (gemini-decision-1 or a Claude model ID).
+  FallbackModel:
+    Type: String
+    Default: claude-sonnet-5-5
+    Description: Claude model that reads the photo when Gemini answers 429 (rate limited).
+  GeminiSecretName:
+    Type: String
+    Default: healthread/gemini-api-key
+    Description: Secrets Manager secret holding the Gemini API key (the raw key string).
   Effort:
     Type: String
     Default: low
@@ -104,6 +113,13 @@ Resources:
               - Effect: Allow
                 Action: sts:GetWebIdentityToken
                 Resource: "*"
+        - PolicyName: gemini-api-key
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GeminiSecretName}-*"
         - PolicyName: state-table
           PolicyDocument:
             Version: "2012-10-17"
@@ -127,6 +143,8 @@ Resources:
       Environment:
         Variables:
           MODEL: !Ref Model
+          FALLBACK_MODEL: !Ref FallbackModel
+          GEMINI_SECRET_ID: !Ref GeminiSecretName
           EFFORT: !Ref Effort
           ANTHROPIC_ORGANIZATION_ID: !Ref AnthropicOrganizationId
           ANTHROPIC_FEDERATION_RULE_ID: !Ref AnthropicFederationRuleId

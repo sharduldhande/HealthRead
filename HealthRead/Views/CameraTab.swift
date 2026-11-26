@@ -10,7 +10,7 @@ struct CameraTab: View {
     @Binding var backCamera: Bool
     @Binding var selectedTab: Int
 
-    // Readers (Claude, Apple models, text recognition), tried in order for the chosen mode
+    // Readers (Apple models, HealthRead's cloud reader, text recognition), tried in order for the chosen mode
     @State private var coordinator = ReadingCoordinator()
     @AppStorage(ReadingMode.storageKey) private var readingModeRaw = ReadingMode.cloudAssisted.rawValue
     private var readingMode: ReadingMode { ReadingMode(rawValue: readingModeRaw) ?? .cloudAssisted }
@@ -126,7 +126,7 @@ struct CameraTab: View {
         // to the app, since the server goes cold after a few idle minutes.
         .task(id: "\(readingModeRaw)|\(didChooseReadingMode)|\(scenePhase == .active)") {
             guard didChooseReadingMode, readingMode == .cloudAssisted, scenePhase == .active else { return }
-            await ClaudeReader.prepare()
+            await CloudReader.prepare()
         }
     }
 
