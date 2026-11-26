@@ -55,12 +55,23 @@ PRICES_PER_MTOK = {
     "claude-sonnet-5-5": (2.00, 10.00),
     "claude-opus-5-5": (4.00, 20.00),
 }
-_input_price, _output_price = PRICES_PER_MTOK.get(MODEL, PRICES_PER_MTOK["claude-opus-5-5"])
-USD_PER_INPUT_TOKEN = _input_price / 1_000_000
-USD_PER_OUTPUT_TOKEN = _output_price / 1_000_000
-# Server-side refusal fallback exists for Opus and Sonnet, not Haiku.
-FALLBACK_OPTIONS = ({} if MODEL.startswith("claude-haiku") else
-                    {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"})
+
+
+def _cost_usd(model, input_tokens, output_tokens):
+    input_price, output_price = PRICES_PER_MTOK.get(model, PRICES_PER_MTOK["claude-opus-5-5"])
+    return round((input_tokens * input_price + output_tokens * output_price) / 1_000_000, 5)
+
+
+def _fallback_options(model):
+    """Server-side refusal fallback exists for Opus and Sonnet, not Haiku."""
+    if model.startswith("claude-haiku"):
+        return {}
+    return {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
+
+
+# Dev-token requests (accuracy tests from a Mac) may pick any priced model and get their own
+# larger per-day allowance; they still count toward the global cap.
+DEV_PER_DAY_LIMIT = 500
 
 INSTRUCTIONS = """You read the display of a home health device in a photo and report the numbers exactly as shown.
 
@@ -251,10 +262,13 @@ def _read(body, headers, install_id):
     started = time.monotonic()
 
     device_id, reason = _authorize(body, headers)
+    model = MODEL
+    if device_id == "dev-bypass" and headers.get("x-healthread-model") in PRICES_PER_MTOK:
+        model = headers["x-healthread-model"]
 
     def report(outcome, status, payload, **extra):
         analytics.capture("reading_service_request", install_id, {
-            "outcome": outcome, "status": status, "model": MODEL,
+            "outcome": outcome, "status": status, "model": model,
             "ms": int((time.monotonic() - started) * 1000),
             # Test-token requests are excluded from dashboards as test traffic.
             "test_request": device_id == "dev-bypass", **extra,
@@ -269,14 +283,15 @@ def _read(body, headers, install_id):
     if error:
         return report("bad_request", error["statusCode"], json.loads(error["body"]))
 
-    limit_hit = store.take_reading_slot(device_id, PER_DEVICE_DAILY_LIMIT, GLOBAL_DAILY_LIMIT)
+    per_device = DEV_PER_DAY_LIMIT if device_id == "dev-bypass" else PER_DEVICE_DAILY_LIMIT
+    limit_hit = store.take_reading_slot(device_id, per_device, GLOBAL_DAILY_LIMIT)
     if limit_hit:
         print(json.dumps({"event": "limit_hit", "limit": limit_hit}))
         return report("rate_limited", 429, {"error": "limit", "limit": limit_hit}, limit=limit_hit)
 
     try:
         response = _anthropic_client().beta.messages.create(
-            model=MODEL,
+            model=model,
             max_tokens=2000,
             system=INSTRUCTIONS,
             messages=[{
@@ -299,7 +314,7 @@ def _read(body, headers, install_id):
             },
             # If a safety classifier declines, the API retries on a fallback model in the same
             # call (Opus and Sonnet only).
-            **FALLBACK_OPTIONS,
+            **_fallback_options(model),
         )
     except anthropic.RateLimitError:
         return report("claude_rate_limited", 429, {"error": "Busy. Try again shortly."})
@@ -318,7 +333,7 @@ def _read(body, headers, install_id):
     tokens = {
         "input_tokens": usage.input_tokens,
         "output_tokens": usage.output_tokens,
-        "cost_usd": round(usage.input_tokens * USD_PER_INPUT_TOKEN + usage.output_tokens * USD_PER_OUTPUT_TOKEN, 5),
+        "cost_usd": _cost_usd(model, usage.input_tokens, usage.output_tokens),
         "claude_ms": int((time.monotonic() - started) * 1000),
     }
     print(json.dumps({"event": "read", "model": response.model, "stop_reason": response.stop_reason, **tokens}))
