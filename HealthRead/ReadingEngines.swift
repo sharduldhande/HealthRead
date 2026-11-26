@@ -92,6 +92,7 @@ enum ReadingPrompt {
 
     If the photo does not clearly show either device's display, report device_type "none".
     Ignore clocks, dates, memory numbers and printed text that is not part of the reading.
+    If glare, a reflection, blur or the edge of the photo hides any digit of a value, report that value as missing. Never guess a digit: a missing number is safe, a wrong one is not.
     """
 }
 
@@ -103,6 +104,8 @@ struct ModelReading: Decodable {
     let pulse: Int?
     let weight_value: Double?
     let weight_unit: String?
+    /// Values the model read but isn't sure of. Analytics only (field names, never numbers).
+    let unclear: [String]?
 
     var result: ReadingResult {
         switch device_type {

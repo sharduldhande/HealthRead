@@ -110,6 +110,25 @@ class CameraController: NSObject {
         }
     }
 
+    /// Displays sit behind glossy plastic: expose a little darker so reflections don't wash
+    /// out and the dark LCD segments stand out, and favor close-range focus.
+    private func configureForDisplays(_ device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            let bias = max(device.minExposureTargetBias, min(-0.7, device.maxExposureTargetBias))
+            device.setExposureTargetBias(bias)
+            if device.isAutoFocusRangeRestrictionSupported {
+                device.autoFocusRangeRestriction = .near
+            }
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+        } catch {
+            print("Couldn't configure the camera for displays: \(error)")
+        }
+    }
+
     private func setStatus(_ newStatus: Status) {
         DispatchQueue.main.async { self.status = newStatus }
     }
@@ -172,7 +191,14 @@ class CameraController: NSObject {
 
         videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "sampleBufferQueue"))
         captureSession.addOutput(videoOutput)
-        captureSession.sessionPreset = AVCaptureSession.Preset.vga640x480
+        // Seven-segment digits need pixels: 640x480 left each digit about 30 px tall, and
+        // glare costs more of a small image. The photo sent for reading is capped at 1600 px.
+        for preset in [AVCaptureSession.Preset.hd1920x1080, .hd1280x720, .vga640x480]
+        where captureSession.canSetSessionPreset(preset) {
+            captureSession.sessionPreset = preset
+            break
+        }
+        configureForDisplays(videoDevice)
 
         // The app runs in portrait only, so frames are always rotated upright for portrait.
         // (UIDevice.current.orientation is .unknown unless orientation updates are on, and

@@ -37,6 +37,8 @@ struct CameraTab: View {
     @State private var weightUnitNote = WeightUnitNote.none
     /// The "make this my default" checkmark on the confirm screen.
     @State private var makeUnitDefault = false
+    /// Glare score of the captured camera frame (share of near-white pixels), for analytics.
+    @State private var captureGlare: Double?
 
     // UI state
     @State private var saveSummary = ""
@@ -134,12 +136,15 @@ struct CameraTab: View {
         ScanningView(
             camera: camera,
             backCamera: $backCamera,
-            onFrameCaptured: { frame, hint in
+            onFrameCaptured: { frame, hint, glare in
                 triggerHaptic(.medium)
                 guard let image = UIImage.from(pixelBuffer: frame) else { return }
-                beginAnalysis(of: image, hint: hint, source: "camera")
+                captureGlare = glare
+                // 1080p frames are capped at 1600 px like picked photos.
+                beginAnalysis(of: image.normalizedForReading(), hint: hint, source: "camera")
             },
             onPhotoPicked: { image in
+                captureGlare = nil
                 beginAnalysis(of: image.normalizedForReading(), hint: nil, source: "photo")
             },
             onEnterManually: { device in
@@ -270,6 +275,8 @@ struct CameraTab: View {
             "total_ms": Int(Date().timeIntervalSince(started) * 1000),
             "mobileclip_hint": hint.map { $0 == .bloodPressure ? "blood_pressure" : "weight_scale" } ?? "none",
             "apple_intelligence": ReadingCoordinator.availability(of: .appleOnDevice) == nil,
+            // Share of near-white pixels in the captured frame (camera only), to tune the glare hint.
+            "glare_pct": captureGlare.map { (($0 * 1000).rounded() / 10) } ?? -1,
         ])
 
         await MainActor.run {

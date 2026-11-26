@@ -76,6 +76,8 @@ If the photo shows a BATHROOM WEIGHT SCALE:
 
 If the photo does not clearly show either device's display, report device_type "none".
 Ignore clocks, dates, memory numbers and printed text that is not part of the reading.
+If glare, a reflection, blur or the edge of the photo hides any digit of a value, set that value to null. Never guess a digit: a missing number is safe, a wrong one is not.
+List in "unclear" the names of the values you did report but are not sure of (for example ["diastolic"]); otherwise use [].
 Set every field that does not apply to null."""
 
 READING_SCHEMA = {
@@ -87,8 +89,10 @@ READING_SCHEMA = {
         "pulse": {"type": ["integer", "null"]},
         "weight_value": {"type": ["number", "null"]},
         "weight_unit": {"anyOf": [{"type": "string", "enum": ["kg", "lbs"]}, {"type": "null"}]},
+        "unclear": {"type": "array",
+                    "items": {"type": "string", "enum": ["systolic", "diastolic", "pulse", "weight_value"]}},
     },
-    "required": ["device_type", "systolic", "diastolic", "pulse", "weight_value", "weight_unit"],
+    "required": ["device_type", "systolic", "diastolic", "pulse", "weight_value", "weight_unit", "unclear"],
     "additionalProperties": False,
 }
 
@@ -330,4 +334,9 @@ def _read(body, headers, install_id):
     except (TypeError, ValueError):
         return report("bad_answer", 502, {"error": "Reader returned an unexpected answer."}, **tokens)
     # Only the kind of device goes to analytics, never the numbers.
-    return report("ok", 200, reading, device_type=reading.get("device_type"), **tokens)
+    # Which values the model was unsure of (names only), to see whether those get corrected.
+    unclear = [f for f in reading.get("unclear") or [] if isinstance(f, str)]
+    missing = [f for f in ("systolic", "diastolic") if reading.get("device_type") == "blood_pressure"
+               and reading.get(f) is None]
+    return report("ok", 200, reading, device_type=reading.get("device_type"),
+                  unclear=unclear, unclear_count=len(unclear), missing=missing, **tokens)

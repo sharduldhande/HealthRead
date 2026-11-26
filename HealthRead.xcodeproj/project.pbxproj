@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		EE00000100000004FFAA0004 /* Analytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000004FFAA0014 /* Analytics.swift */; };
+		EE00000100000005FFAA0005 /* FrameQuality.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000005FFAA0015 /* FrameQuality.swift */; };
 		EE00000100000003FFAA0003 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000003FFAA0013 /* SettingsView.swift */; };
 		EE00000100000002FFAA0002 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000002FFAA0012 /* OnboardingView.swift */; };
 		EE00000100000001FFAA0001 /* ReadingEngines.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000001FFAA0011 /* ReadingEngines.swift */; };
@@ -50,6 +51,7 @@
 
 /* Begin PBXFileReference section */
 		EE00000200000004FFAA0014 /* Analytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analytics.swift; sourceTree = "<group>"; };
+		EE00000200000005FFAA0015 /* FrameQuality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameQuality.swift; sourceTree = "<group>"; };
 		EE00000200000003FFAA0013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		EE00000200000002FFAA0012 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		EE00000200000001FFAA0011 /* ReadingEngines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingEngines.swift; sourceTree = "<group>"; };
@@ -178,6 +180,7 @@
 				AA00000200000004AABB0014 /* HealthKitManager.swift */,
 				EE00000200000001FFAA0011 /* ReadingEngines.swift */,
 				EE00000200000004FFAA0014 /* Analytics.swift */,
+				EE00000200000005FFAA0015 /* FrameQuality.swift */,
 				AA00000200000009AABB0019 /* HealthRead.entitlements */,
 				F3E8D4A42BF9E30B000FD824 /* Assets.xcassets */,
 				F3E8D4A62BF9E30B000FD824 /* Preview Content */,
@@ -328,6 +331,7 @@
 				AA00000100000006AABB0006 /* ConfirmReadingView.swift in Sources */,
 				AA00000100000007AABB0007 /* SuccessView.swift in Sources */,
 				EE00000100000004FFAA0004 /* Analytics.swift in Sources */,
+				EE00000100000005FFAA0005 /* FrameQuality.swift in Sources */,
 				EE00000100000003FFAA0003 /* SettingsView.swift in Sources */,
 				EE00000100000002FFAA0002 /* OnboardingView.swift in Sources */,
 				EE00000100000001FFAA0001 /* ReadingEngines.swift in Sources */,

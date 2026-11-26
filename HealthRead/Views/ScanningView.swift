@@ -25,8 +25,9 @@ struct ScanningView: View {
 
     let camera: CameraController
     @Binding var backCamera: Bool
-    /// The captured frame, plus the device MobileCLIP thinks is in view (a hint for text recognition).
-    let onFrameCaptured: (CVPixelBuffer, DeviceType?) -> Void
+    /// The captured frame, the device MobileCLIP thinks is in view (a hint for text
+    /// recognition), and the frame's glare score (for analytics).
+    let onFrameCaptured: (CVPixelBuffer, DeviceType?, Double) -> Void
     let onPhotoPicked: (UIImage) -> Void
     let onEnterManually: (DeviceType) -> Void
 
@@ -41,6 +42,11 @@ struct ScanningView: View {
     @State private var pickedPhoto: PhotosPickerItem?
     /// Zoom when the current pinch began.
     @State private var pinchStartZoom: CGFloat?
+    /// The last half second of glare-scored frames; the shutter uses the cleanest.
+    @State private var recentFrames = RecentFrames()
+    /// Shown after a few glary frames in a row, cleared after a few clean ones.
+    @State private var showGlareHint = false
+    @State private var glareStreak = 0
 
     var body: some View {
         ZStack {
@@ -168,10 +174,15 @@ struct ScanningView: View {
 
     private var captureButton: some View {
         Button {
-            guard let frame = latestFrame else { return }
+            guard let latestFrame else { return }
             let generator = UIImpactFeedbackGenerator(style: .medium)
             generator.impactOccurred()
-            onFrameCaptured(frame, detectedDevice)
+            // The least glary frame from the last half second, else the newest one.
+            if let best = recentFrames.best() {
+                onFrameCaptured(best.frame, detectedDevice, best.glare)
+            } else {
+                onFrameCaptured(latestFrame, detectedDevice, FrameQuality.glareFraction(latestFrame))
+            }
         } label: {
             ZStack {
                 Circle()
@@ -255,7 +266,13 @@ struct ScanningView: View {
 
     private var statusPill: some View {
         HStack(spacing: 12) {
-            if let device = detectedDevice {
+            if showGlareHint {
+                Image(systemName: "sun.max.fill")
+                    .foregroundStyle(.orange)
+                Text("Glare on the display: tilt your phone a little")
+                    .font(.callout)
+                    .fontWeight(.medium)
+            } else if let device = detectedDevice {
                 Image(systemName: device.icon)
                     .foregroundStyle(.green)
                 Text("\(device.displayName) detected")
@@ -318,10 +335,18 @@ struct ScanningView: View {
 
         async let distributeFrames: () = {
             [framesToClassifyContinuation, framesToDisplayContinuation] in
+            var frameCount = 0
             for await sampleBuffer in frames {
                 if let frame = sampleBuffer.imageBuffer {
                     framesToClassifyContinuation.yield(frame)
                     framesToDisplayContinuation.yield(frame)
+                    // Score every 4th frame for glare (about 8 a second).
+                    frameCount += 1
+                    if frameCount % 4 == 0 {
+                        let glare = FrameQuality.glareFraction(frame)
+                        recentFrames.add(frame, glare: glare)
+                        await MainActor.run { noteGlare(glare) }
+                    }
                 }
             }
             await MainActor.run {
@@ -340,6 +365,18 @@ struct ScanningView: View {
 
         await distributeFrames
         await classifyFrames
+    }
+
+    /// Debounced so the hint doesn't flicker: three glary samples in a row show it, three
+    /// clean ones hide it.
+    private func noteGlare(_ glare: Double) {
+        let glary = glare > FrameQuality.glareHintThreshold
+        glareStreak = glary ? max(1, glareStreak + 1) : min(-1, glareStreak - 1)
+        if glareStreak >= 3, !showGlareHint {
+            withAnimation { showGlareHint = true }
+        } else if glareStreak <= -3, showGlareHint {
+            withAnimation { showGlareHint = false }
+        }
     }
 
     // MARK: - Classification (detection indicator only — does NOT trigger capture)

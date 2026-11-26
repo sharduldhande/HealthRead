@@ -64,7 +64,8 @@ struct VideoFrameView: View {
 private struct _ImageView: UIViewRepresentable {
 
     let image: Any
-    var gravity = CALayerContentsGravity.center
+    // Fill the viewport with the whole frame (frames are larger than the screen in points).
+    var gravity = CALayerContentsGravity.resizeAspectFill
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
