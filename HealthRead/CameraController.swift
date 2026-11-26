@@ -27,6 +27,30 @@ class CameraController: NSObject {
 
     private var permissionGranted = false
     private var captureSession: AVCaptureSession?
+    private var videoDevice: AVCaptureDevice?
+
+    /// Current zoom, 1 = no zoom. Updated on the main thread.
+    public private(set) var zoomFactor: CGFloat = 1
+    /// Past this, digital zoom only blurs the display's digits.
+    public static let maxZoom: CGFloat = 5
+
+    /// Zooms the camera itself, so the captured frame (what gets read) is zoomed too and
+    /// gains detail from the full-resolution sensor.
+    public func setZoom(_ factor: CGFloat) {
+        sessionQueue.async { [self] in
+            guard let videoDevice else { return }
+            let upper = min(videoDevice.maxAvailableVideoZoomFactor, Self.maxZoom)
+            let clamped = max(videoDevice.minAvailableVideoZoomFactor, min(factor, upper))
+            do {
+                try videoDevice.lockForConfiguration()
+                videoDevice.videoZoomFactor = clamped
+                videoDevice.unlockForConfiguration()
+            } catch {
+                return
+            }
+            DispatchQueue.main.async { self.zoomFactor = clamped }
+        }
+    }
     private let sessionQueue = DispatchQueue(label: "sessionQueue")
 
     public func attach(continuation: AsyncStream<CMSampleBuffer>.Continuation) {
@@ -45,6 +69,7 @@ class CameraController: NSObject {
         sessionQueue.sync { [self] in
             captureSession?.stopRunning()
             captureSession = nil
+            videoDevice = nil
         }
 
     }
@@ -142,6 +167,8 @@ class CameraController: NSObject {
             return false
         }
         captureSession.addInput(videoDeviceInput)
+        self.videoDevice = videoDevice
+        DispatchQueue.main.async { self.zoomFactor = 1 }
 
         videoOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "sampleBufferQueue"))
         captureSession.addOutput(videoOutput)

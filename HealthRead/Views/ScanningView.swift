@@ -39,6 +39,8 @@ struct ScanningView: View {
     @State private var pulseAnimation = false
     @State private var latestFrame: CVPixelBuffer?
     @State private var pickedPhoto: PhotosPickerItem?
+    /// Zoom when the current pinch began.
+    @State private var pinchStartZoom: CGFloat?
 
     var body: some View {
         ZStack {
@@ -55,6 +57,9 @@ struct ScanningView: View {
                     } else if let framesToDisplay {
                         VideoFrameView(frames: framesToDisplay, backCamera: $backCamera)
                             .clipShape(RoundedRectangle(cornerRadius: 24))
+                            .contentShape(Rectangle())
+                            .gesture(pinchToZoom)
+                            .overlay(alignment: .bottomLeading) { zoomButton }
                     } else {
                         RoundedRectangle(cornerRadius: 24)
                             .fill(Color(.systemGray6))
@@ -117,6 +122,45 @@ struct ScanningView: View {
             } else {
                 pulseAnimation = false
             }
+        }
+    }
+
+    // MARK: - Zoom
+
+    private var pinchToZoom: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let start = pinchStartZoom ?? camera.zoomFactor
+                pinchStartZoom = start
+                camera.setZoom(start * value.magnification)
+            }
+            .onEnded { _ in pinchStartZoom = nil }
+    }
+
+    /// Steps through 1×, 2× and 3× like the Camera app; pinch for anything in between.
+    private var zoomButton: some View {
+        let zoom = camera.zoomFactor
+        let next = [2, 3].map(CGFloat.init).first { $0 > zoom + 0.05 } ?? 1
+        let label = abs(zoom - zoom.rounded()) < 0.05
+            ? String(format: "%.0f\u{00D7}", zoom)
+            : String(format: "%.1f\u{00D7}", zoom)
+        return Button {
+            UISelectionFeedbackGenerator().selectionChanged()
+            camera.setZoom(next)
+        } label: {
+            Text(label)
+                .font(.footnote.weight(.semibold).monospacedDigit())
+                .foregroundStyle(zoom > 1.05 ? .yellow : .white)
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.45), in: Circle())
+                .padding(12)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Zoom")
+        .accessibilityValue(label)
+        .accessibilityHint("Pinch the camera view to zoom in or out")
+        .accessibilityAdjustableAction { direction in
+            camera.setZoom(direction == .increment ? zoom + 0.5 : zoom - 0.5)
         }
     }
 
