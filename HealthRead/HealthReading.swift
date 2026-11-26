@@ -42,6 +42,24 @@ struct WeightReading: Identifiable {
 enum WeightUnit: String, CaseIterable {
     case lbs = "lbs"
     case kg = "kg"
+
+    /// The person's chosen default, used when a scale's display shows no unit. Empty means
+    /// "ask me". Set only on purpose (Settings, or the checkmark on the confirm screen).
+    static let defaultKey = "defaultWeightUnit"
+
+    static var savedDefault: WeightUnit? {
+        UserDefaults.standard.string(forKey: defaultKey).flatMap(WeightUnit.init(rawValue:))
+    }
+}
+
+/// Where the weight unit on the confirm screen came from, when the display showed none.
+enum WeightUnitNote: Equatable {
+    /// The display showed the unit, or the person is typing the reading in.
+    case none
+    /// No unit on the display and no default: the confirm screen asks.
+    case ask
+    /// No unit on the display, so the saved default was filled in.
+    case usedDefault
 }
 
 // MARK: - Blood Pressure Category
@@ -115,8 +133,8 @@ enum ReadingChecks {
         return issues
     }
 
-    static func weight(_ weight: Double?, unit: WeightUnit) -> [ReadingIssue] {
-        guard let weight else { return [] }
+    static func weight(_ weight: Double?, unit: WeightUnit?) -> [ReadingIssue] {
+        guard let weight, let unit else { return [] }
         let range: ClosedRange<Double> = unit == .kg ? 2...300 : 5...660
         if !range.contains(weight) {
             let low = Int(range.lowerBound), high = Int(range.upperBound)

@@ -5,6 +5,8 @@ struct SettingsView: View {
 
     @AppStorage(ReadingMode.storageKey) private var readingModeRaw = ReadingMode.cloudAssisted.rawValue
     @AppStorage(Analytics.enabledKey) private var analyticsEnabled = true
+    /// "" means ask when a scale's display shows no unit.
+    @AppStorage(WeightUnit.defaultKey) private var defaultWeightUnit = ""
     @Environment(\.dismiss) private var dismiss
 
     private var readingMode: ReadingMode { ReadingMode(rawValue: readingModeRaw) ?? .cloudAssisted }
@@ -48,6 +50,19 @@ struct SettingsView: View {
                     Text("Tried in this order")
                 } footer: {
                     Text("If a reader can\u{2019}t run, HealthRead moves on to the next one. You always check the numbers before saving.")
+                }
+
+                Section {
+                    Picker("Default weight unit", selection: $defaultWeightUnit) {
+                        Text("Ask me").tag("")
+                        ForEach(WeightUnit.allCases, id: \.self) { unit in
+                            Text(unit.rawValue).tag(unit.rawValue)
+                        }
+                    }
+                } header: {
+                    Text("Weight")
+                } footer: {
+                    Text("Used when a scale\u{2019}s display doesn\u{2019}t show kg or lbs. With \u{201C}Ask me\u{201D}, you choose on the confirm screen.")
                 }
 
                 Section {

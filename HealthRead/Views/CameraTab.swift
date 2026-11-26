@@ -32,7 +32,11 @@ struct CameraTab: View {
 
     // Weight fields
     @State private var weight = ""
-    @State private var weightUnit: WeightUnit = .lbs
+    /// nil when the reader saw no unit on the display: the confirm screen asks for it.
+    @State private var weightUnit: WeightUnit? = .lbs
+    @State private var weightUnitNote = WeightUnitNote.none
+    /// The "make this my default" checkmark on the confirm screen.
+    @State private var makeUnitDefault = false
 
     // UI state
     @State private var saveSummary = ""
@@ -216,7 +220,9 @@ struct CameraTab: View {
                     diastolic: $diastolic,
                     pulse: $pulse,
                     weight: $weight,
-                    weightUnit: $weightUnit
+                    weightUnit: $weightUnit,
+                    weightUnitNote: weightUnitNote,
+                    makeUnitDefault: $makeUnitDefault
                 )
                 .padding(.top, 20)
             }
@@ -282,9 +288,20 @@ struct CameraTab: View {
                 readerValues = currentValues(.bloodPressure)
                 withAnimation { appState = .confirm(.bloodPressure) }
 
-            case .weight(let reading):
-                weight = String(format: "%.1f", reading.weight)
-                weightUnit = reading.unit
+            case .weight(let value, let unit):
+                weight = String(format: "%.1f", value)
+                if let unit {
+                    weightUnit = unit
+                    weightUnitNote = .none
+                } else if let saved = WeightUnit.savedDefault {
+                    weightUnit = saved
+                    weightUnitNote = .usedDefault
+                } else {
+                    // Never guess: 72 saved as lbs instead of kg is a wrong reading.
+                    weightUnit = nil
+                    weightUnitNote = .ask
+                }
+                makeUnitDefault = false
                 readingSource = reader.map(ReadingSource.reader) ?? .manual
                 readerValues = currentValues(.weightScale)
                 withAnimation { appState = .confirm(.weightScale) }
@@ -318,6 +335,8 @@ struct CameraTab: View {
         pulse = ""
         weight = ""
         weightUnit = Self.preferredWeightUnit
+        weightUnitNote = .none
+        makeUnitDefault = false
         readingSource = .manual
         withAnimation { appState = .confirm(device) }
     }
@@ -336,11 +355,14 @@ struct CameraTab: View {
                     savedToAppleHealth = try await healthKit.saveBloodPressure(reading) == .appleHealth
                     saveSummary = "\(sys)/\(dia) mmHg" + (reading.pulse.map { " · \($0) bpm" } ?? "")
                 } else {
-                    guard let wt = Double(weight) else { isSaving = false; return }
-                    let reading = WeightReading(weight: wt, unit: weightUnit, timestamp: measuredAt)
+                    guard let wt = Double(weight), let unit = weightUnit else { isSaving = false; return }
+                    let reading = WeightReading(weight: wt, unit: unit, timestamp: measuredAt)
                     savedToAppleHealth = try await healthKit.saveWeight(reading) == .appleHealth
-                    saveSummary = String(format: "%.1f %@", wt, weightUnit.rawValue)
-                    UserDefaults.standard.set(weightUnit.rawValue, forKey: "weightUnit")
+                    saveSummary = String(format: "%.1f %@", wt, unit.rawValue)
+                    UserDefaults.standard.set(unit.rawValue, forKey: "weightUnit")
+                    if makeUnitDefault {
+                        UserDefaults.standard.set(unit.rawValue, forKey: WeightUnit.defaultKey)
+                    }
                 }
 
                 triggerHaptic(.success)
@@ -385,7 +407,7 @@ struct CameraTab: View {
 
     /// The values on the confirm screen as one string, used only to detect edits on this phone.
     private func currentValues(_ device: DeviceType) -> String {
-        device == .bloodPressure ? "\(systolic)/\(diastolic)/\(pulse)" : "\(weight)\(weightUnit.rawValue)"
+        device == .bloodPressure ? "\(systolic)/\(diastolic)/\(pulse)" : "\(weight)\(weightUnit?.rawValue ?? "")"
     }
 
     private func resetToScanning() {
@@ -400,14 +422,18 @@ struct CameraTab: View {
         diastolic = ""
         pulse = ""
         weight = ""
+        weightUnitNote = .none
+        makeUnitDefault = false
         isSaving = false
         withAnimation { appState = .scanning }
     }
 
     // MARK: - Helpers
 
-    /// The last unit the user saved with, else the region's usual unit.
+    /// For typing a weight in: the chosen default, else the last unit saved with, else the
+    /// region's usual unit. (A reader that saw no unit never uses this; see `weightUnitNote`.)
     private static var preferredWeightUnit: WeightUnit {
+        if let chosen = WeightUnit.savedDefault { return chosen }
         if let saved = UserDefaults.standard.string(forKey: "weightUnit"),
            let unit = WeightUnit(rawValue: saved) {
             return unit

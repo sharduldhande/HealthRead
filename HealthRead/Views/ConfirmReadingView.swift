@@ -20,7 +20,9 @@ struct ConfirmReadingView: View {
 
     // Weight fields
     @Binding var weight: String
-    @Binding var weightUnit: WeightUnit
+    @Binding var weightUnit: WeightUnit?
+    var weightUnitNote: WeightUnitNote = .none
+    @Binding var makeUnitDefault: Bool
 
     @FocusState private var focusedField: Field?
     @State private var showFullPhoto = false
@@ -231,7 +233,7 @@ struct ConfirmReadingView: View {
             ReadingField(
                 label: "Weight",
                 value: $weight,
-                suffix: weightUnit.rawValue,
+                suffix: weightUnit?.rawValue ?? "",
                 keyboard: .decimalPad,
                 focused: $focusedField,
                 field: .weight
@@ -239,15 +241,49 @@ struct ConfirmReadingView: View {
 
             HStack {
                 Text("Unit")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(weightUnit == nil ? .primary : .secondary)
+                    .fontWeight(weightUnit == nil ? .semibold : .regular)
                 Spacer()
                 Picker("Unit", selection: $weightUnit) {
                     ForEach(WeightUnit.allCases, id: \.self) { unit in
-                        Text(unit.rawValue).tag(unit)
+                        Text(unit.rawValue).tag(Optional(unit))
                     }
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 140)
+            }
+            switch weightUnitNote {
+            case .ask:
+                // The display showed no unit, and a guessed unit would save a wrong weight.
+                if weightUnit == nil {
+                    Label("No unit on the display. Choose the unit your scale uses.", systemImage: "questionmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button {
+                    makeUnitDefault.toggle()
+                } label: {
+                    Label {
+                        Text("Make \(weightUnit?.rawValue ?? "this") my default unit")
+                            .foregroundStyle(.primary)
+                    } icon: {
+                        Image(systemName: makeUnitDefault ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(makeUnitDefault ? Color.accentColor : .secondary)
+                    }
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(makeUnitDefault ? .isSelected : [])
+                .accessibilityHint("Used whenever a scale's display shows no unit. You can change it in Settings.")
+            case .usedDefault:
+                Text("No unit on the display, so your default (\(weightUnit?.rawValue ?? "")) is used. Change it in Settings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .none:
+                EmptyView()
             }
         }
     }
@@ -291,7 +327,7 @@ struct ConfirmReadingView: View {
             let pulseOK = pulse.isEmpty || Int(pulse) != nil
             fieldsFilled = Int(systolic) != nil && Int(diastolic) != nil && pulseOK
         } else {
-            fieldsFilled = Double(weight) != nil
+            fieldsFilled = Double(weight) != nil && weightUnit != nil
         }
         return fieldsFilled && !issues.contains(where: \.blocksSave)
     }

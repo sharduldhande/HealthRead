@@ -14,7 +14,8 @@ import FoundationModels
 /// What a reader found in a photo.
 enum ReadingResult {
     case bloodPressure(BloodPressureReading)
-    case weight(WeightReading)
+    /// `unit` is nil when the display shows no unit; the confirm screen then asks for it.
+    case weight(Double, unit: WeightUnit?)
     case noDeviceDetected
     /// The reader could not run or failed; the coordinator moves on to the next reader.
     /// `category` is a short fixed label for analytics (never contains reading data).
@@ -87,7 +88,7 @@ enum ReadingPrompt {
 
     If the photo shows a BATHROOM WEIGHT SCALE:
     - weight is the number on the display, including any decimal point
-    - unit is "kg" or "lbs" from the unit shown on the display; if no unit is visible, use "lbs"
+    - unit is "kg" or "lbs" only if that unit is shown on the display; if no unit is visible, leave the unit empty (never guess it)
 
     If the photo does not clearly show either device's display, report device_type "none".
     Ignore clocks, dates, memory numbers and printed text that is not part of the reading.
@@ -114,7 +115,7 @@ struct ModelReading: Decodable {
             guard let weight_value else {
                 return .error("Couldn\u{2019}t read the weight from the display.")
             }
-            return .weight(WeightReading(weight: weight_value, unit: weight_unit == "kg" ? .kg : .lbs))
+            return .weight(weight_value, unit: weight_unit.flatMap(WeightUnit.init(rawValue:)))
         default:
             return .noDeviceDetected
         }
@@ -440,7 +441,7 @@ struct AppleDisplayReading {
     var pulse: Int?
     @Guide(description: "Weight shown on a scale display, including decimals")
     var weightValue: Double?
-    @Guide(description: "Weight unit shown on the scale display")
+    @Guide(description: "Weight unit printed on the scale display; empty if no unit is shown")
     var weightUnit: AppleWeightUnit?
 
     var result: ReadingResult {
@@ -457,7 +458,7 @@ struct AppleDisplayReading {
             return .bloodPressure(BloodPressureReading(systolic: systolic, diastolic: diastolic, pulse: pulse))
         case .weightScale:
             guard let weightValue else { return .error("Couldn\u{2019}t read the weight from the display.") }
-            return .weight(WeightReading(weight: weightValue, unit: weightUnit == .kg ? .kg : .lbs))
+            return .weight(weightValue, unit: weightUnit.map { $0 == .kg ? .kg : .lbs })
         case .none:
             return .noDeviceDetected
         }
@@ -490,7 +491,9 @@ struct TextRecognitionReader {
             || joined.range(of: #"\b(kg|lbs?)\b"#, options: .regularExpression) != nil
             || joined.range(of: #"\d{2,3}\.\d(?!\s*(in|cm))"#, options: .regularExpression) != nil)
         if hint != .bloodPressure, looksLikeScale, let weight = Self.parseWeight(texts) {
-            return .weight(WeightReading(weight: weight, unit: joined.contains("kg") ? .kg : .lbs))
+            let unit: WeightUnit? = joined.range(of: #"\bkg\b"#, options: .regularExpression) != nil ? .kg
+                : joined.range(of: #"\blbs?\b"#, options: .regularExpression) != nil ? .lbs : nil
+            return .weight(weight, unit: unit)
         }
         return .error("Text recognition couldn\u{2019}t read this display. Seven-segment digits are hard for it; try again closer and without glare, or type the numbers.", category: "no_reading")
     }

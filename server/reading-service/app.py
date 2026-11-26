@@ -72,7 +72,7 @@ If the photo shows a BLOOD PRESSURE MONITOR:
 
 If the photo shows a BATHROOM WEIGHT SCALE:
 - weight_value is the number on the display, including any decimal point
-- weight_unit is "kg" or "lbs" from the unit shown on the display; if no unit is visible, use "lbs"
+- weight_unit is "kg" or "lbs" only if that unit is shown on the display; if no unit is visible, weight_unit is null (never guess it)
 
 If the photo does not clearly show either device's display, report device_type "none".
 Ignore clocks, dates, memory numbers and printed text that is not part of the reading.
