@@ -147,11 +147,10 @@ class CameraController: NSObject {
         captureSession.addOutput(videoOutput)
         captureSession.sessionPreset = AVCaptureSession.Preset.vga640x480
 
-        if videoDevice.isContinuityCamera {
-            setOrientation(.portrait)
-        } else {
-            setOrientation(UIDevice.current.orientation)
-        }
+        // The app runs in portrait only, so frames are always rotated upright for portrait.
+        // (UIDevice.current.orientation is .unknown unless orientation updates are on, and
+        // .unknown left frames in the sensor's landscape angle, 90° off.)
+        setOrientation(.portrait)
         return true
     }
 }
