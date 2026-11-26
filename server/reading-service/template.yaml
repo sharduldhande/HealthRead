@@ -171,7 +171,7 @@ Resources:
 
 Outputs:
   ServiceURL:
-    Description: Put this in ClaudeReader.serviceURL in the iOS app.
+    Description: Put this in CloudReader.serviceURL in the iOS app.
     Value: !GetAtt ReadingFunctionUrl.FunctionUrl
   RoleArn:
     Description: The AWS identity the federation rule in the Claude Console should match.
