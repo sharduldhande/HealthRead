@@ -49,9 +49,18 @@ PER_DEVICE_DAILY_LIMIT = int(os.environ.get("PER_DEVICE_DAILY_LIMIT", "20"))
 GLOBAL_DAILY_LIMIT = int(os.environ.get("GLOBAL_DAILY_LIMIT", "300"))
 # For testing from a Mac or the Simulator, where App Attest doesn't exist. Empty = disabled.
 DEV_BYPASS_TOKEN = os.environ.get("DEV_BYPASS_TOKEN", "")
-# Opus 5.5 list prices, for the cost estimate sent to analytics.
-USD_PER_INPUT_TOKEN = 4 / 1_000_000
-USD_PER_OUTPUT_TOKEN = 20 / 1_000_000
+# List prices in USD per million tokens (input, output), for the cost estimate sent to analytics.
+PRICES_PER_MTOK = {
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
+}
+_input_price, _output_price = PRICES_PER_MTOK.get(MODEL, PRICES_PER_MTOK["claude-opus-5-5"])
+USD_PER_INPUT_TOKEN = _input_price / 1_000_000
+USD_PER_OUTPUT_TOKEN = _output_price / 1_000_000
+# Server-side refusal fallback exists for Opus and Sonnet, not Haiku.
+FALLBACK_OPTIONS = ({} if MODEL.startswith("claude-haiku") else
+                    {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"})
 
 INSTRUCTIONS = """You read the display of a home health device in a photo and report the numbers exactly as shown.
 
@@ -284,9 +293,9 @@ def _read(body, headers, install_id):
                 "effort": EFFORT,
                 "format": {"type": "json_schema", "schema": READING_SCHEMA},
             },
-            # If a safety classifier declines, the API retries on a fallback model in the same call.
-            betas=["server-side-fallback-2026-07-01"],
-            fallbacks="default",
+            # If a safety classifier declines, the API retries on a fallback model in the same
+            # call (Opus and Sonnet only).
+            **FALLBACK_OPTIONS,
         )
     except anthropic.RateLimitError:
         return report("claude_rate_limited", 429, {"error": "Busy. Try again shortly."})

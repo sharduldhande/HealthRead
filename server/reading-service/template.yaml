@@ -9,7 +9,7 @@ Description: >
 Parameters:
   Model:
     Type: String
-    Default: claude-opus-5-5
+    Default: claude-haiku-5-5
     Description: Claude model ID used for readings.
   Effort:
     Type: String
