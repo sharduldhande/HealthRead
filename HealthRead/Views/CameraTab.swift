@@ -14,6 +14,8 @@ struct CameraTab: View {
     @State private var coordinator = ReadingCoordinator()
     @AppStorage(ReadingMode.storageKey) private var readingModeRaw = ReadingMode.cloudAssisted.rawValue
     private var readingMode: ReadingMode { ReadingMode(rawValue: readingModeRaw) ?? .cloudAssisted }
+    @AppStorage(ReadingMode.chosenKey) private var didChooseReadingMode = false
+    @Environment(\.scenePhase) private var scenePhase
 
     // App state
     @State private var appState: AppState = .scanning
@@ -112,6 +114,13 @@ struct CameraTab: View {
         }
         .onAppear {
             weightUnit = Self.preferredWeightUnit
+        }
+        // In Cloud Assisted mode, do App Attest setup and wake the server while the person
+        // lines up the shot, so it isn't added to the first reading. Again on each return
+        // to the app, since the server goes cold after a few idle minutes.
+        .task(id: "\(readingModeRaw)|\(didChooseReadingMode)|\(scenePhase == .active)") {
+            guard didChooseReadingMode, readingMode == .cloudAssisted, scenePhase == .active else { return }
+            await ClaudeReader.prepare()
         }
     }
 

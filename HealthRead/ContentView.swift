@@ -44,6 +44,9 @@ struct ContentView: View {
         .task(id: didChooseReadingMode) {
             guard didChooseReadingMode else { return }
             camera.start()
+            // Let the onboarding cover finish closing first: iOS can't show the Health
+            // permission sheet mid-dismissal, and the request then never returns.
+            try? await Task.sleep(for: .seconds(1))
             _ = await healthKit.requestAuthorization()
         }
         .fullScreenCover(isPresented: .constant(!didChooseReadingMode)) {

@@ -214,12 +214,23 @@ struct ClaudeReader {
 
     static var isConfigured: Bool { serviceURL != nil }
 
-    private let session: URLSession = {
+    private static let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 25
         config.timeoutIntervalForResource = 30
         return URLSession(configuration: config)
     }()
+    private var session: URLSession { Self.session }
+
+    /// Does the slow one-time work before the shutter instead of after it: registers this
+    /// install with App Attest if it hasn't yet, and wakes the server (a GET gets an instant
+    /// 405 with no database or Claude work, but starts the function). Errors are ignored;
+    /// `read` repeats whatever is still missing.
+    static func prepare() async {
+        guard let baseURL = serviceURL, DCAppAttestService.shared.isSupported else { return }
+        _ = try? await AppAttestClient.shared.attestedKeyID(baseURL: baseURL, session: session)
+        _ = try? await session.data(from: baseURL.appending(path: "warm"))
+    }
 
     func read(_ image: CGImage) async -> ReadingResult {
         guard let baseURL = Self.serviceURL else {

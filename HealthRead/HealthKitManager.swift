@@ -61,14 +61,21 @@ class HealthKitManager {
         case thisDeviceOnly
     }
 
-    /// Makes sure we've asked for Health access before writing. Previously a save made
-    /// before the permission sheet finished went only to local storage, silently.
-    private func healthStoreForWriting() async -> HKHealthStore? {
+    /// Decides from HealthKit's own record of the person's answer, not from whether an
+    /// earlier request returned: a request that never came back used to hang every save.
+    private func healthStoreForWriting(_ type: HKQuantityType) async -> HKHealthStore? {
         guard let healthStore else { return nil }
-        if !isHealthKitAvailable {
-            _ = await requestAuthorization()
+        switch healthStore.authorizationStatus(for: type) {
+        case .sharingAuthorized, .sharingDenied:
+            // Denied still returns the store: the write then fails with a clear
+            // "Health access is off" error instead of a silent app-only save.
+            isHealthKitAvailable = true
+            return healthStore
+        case .notDetermined:
+            return await requestAuthorization() ? healthStore : nil
+        @unknown default:
+            return await requestAuthorization() ? healthStore : nil
         }
-        return isHealthKitAvailable ? healthStore : nil
     }
 
     /// Save a blood pressure reading. Throws if Apple Health refuses the write
@@ -76,7 +83,7 @@ class HealthKitManager {
     @discardableResult
     func saveBloodPressure(_ reading: BloodPressureReading) async throws -> SaveDestination {
         var destination = SaveDestination.thisDeviceOnly
-        if let store = await healthStoreForWriting() {
+        if let store = await healthStoreForWriting(HKQuantityType(.bloodPressureSystolic)) {
             try await saveBloodPressureToHealthKit(reading, store: store)
             destination = .appleHealth
         }
@@ -90,7 +97,7 @@ class HealthKitManager {
     @discardableResult
     func saveWeight(_ reading: WeightReading) async throws -> SaveDestination {
         var destination = SaveDestination.thisDeviceOnly
-        if let store = await healthStoreForWriting() {
+        if let store = await healthStoreForWriting(HKQuantityType(.bodyMass)) {
             try await saveWeightToHealthKit(reading, store: store)
             destination = .appleHealth
         }
