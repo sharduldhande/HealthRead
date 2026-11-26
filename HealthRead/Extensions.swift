@@ -38,3 +38,31 @@ extension CIImage {
         return self.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
     }
 }
+
+import UIKit
+
+extension UIImage {
+
+    /// Makes a UIImage from a camera frame. Frames are already rotated to portrait
+    /// by the capture connection, so no extra orientation is applied.
+    static func from(pixelBuffer: CVPixelBuffer) -> UIImage? {
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = CIContext().createCGImage(ciImage, from: ciImage.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    /// Redraws the image upright (applying its EXIF orientation) and no larger than
+    /// `maxDimension` pixels on its longest side. Library photos can be 12+ MP; the
+    /// readers only need enough resolution to see the display digits.
+    func normalizedForReading(maxDimension: CGFloat = 1600) -> UIImage {
+        let pixelSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let longest = max(pixelSize.width, pixelSize.height)
+        let factor = longest > maxDimension ? maxDimension / longest : 1
+        let target = CGSize(width: (pixelSize.width * factor).rounded(), height: (pixelSize.height * factor).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: target))
+        }
+    }
+}

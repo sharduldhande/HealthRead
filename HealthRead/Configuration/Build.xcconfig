@@ -6,6 +6,10 @@
 // they are frequently downloaded and don't have a development team set.
 DISAMBIGUATOR=${DEVELOPMENT_TEAM}
 
-// Gemini 2.5 Flash-Lite API Key
-// Get your key at https://aistudio.google.com/apikey
-GEMINI_API_KEY =
+
+// Anonymous usage analytics (PostHog). The project key is public by design (it can only
+// send events), but it stays out of this public repo: put it in the gitignored
+// Local.xcconfig as POSTHOG_API_KEY = phc_... . Without it the app sends no analytics.
+POSTHOG_API_KEY =
+POSTHOG_HOST = https:/$()/eu.i.posthog.com
+#include? "Local.xcconfig"

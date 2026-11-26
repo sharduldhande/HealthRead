@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EE00000100000004FFAA0004 /* Analytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000004FFAA0014 /* Analytics.swift */; };
+		EE00000100000005FFAA0005 /* FrameQuality.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000005FFAA0015 /* FrameQuality.swift */; };
+		EE00000100000003FFAA0003 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000003FFAA0013 /* SettingsView.swift */; };
+		EE00000100000002FFAA0002 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000002FFAA0012 /* OnboardingView.swift */; };
+		EE00000100000001FFAA0001 /* ReadingEngines.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE00000200000001FFAA0011 /* ReadingEngines.swift */; };
 		AA00000100000001AABB0001 /* HealthReadingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000200000001AABB0011 /* HealthReadingState.swift */; };
 		AA00000100000002AABB0002 /* HealthReading.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000200000002AABB0012 /* HealthReading.swift */; };
 		AA00000100000004AABB0004 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA00000200000004AABB0014 /* HealthKitManager.swift */; };
@@ -29,9 +34,6 @@
 		C3EF64662C135E220034EC11 /* mobileclip_s0_image.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = C3EF64602C135E220034EC11 /* mobileclip_s0_image.mlpackage */; };
 		C3EF64672C135E220034EC11 /* mobileclip_s0_text.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = C3EF64612C135E220034EC11 /* mobileclip_s0_text.mlpackage */; };
 		C3EF646A2C135FC70034EC11 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3EF64692C135FC70034EC11 /* Models.swift */; };
-		CC00000100000001DDEE0001 /* GeminiService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000200000001DDEE0011 /* GeminiService.swift */; };
-		CC00000100000002DDEE0002 /* APIKeyProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC00000200000002DDEE0012 /* APIKeyProvider.swift */; };
-		CC00000100000003DDEE0003 /* Secrets.plist in Resources */ = {isa = PBXBuildFile; fileRef = CC00000200000003DDEE0013 /* Secrets.plist */; };
 		F3E8D4A12BF9E30A000FD824 /* HealthReadApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3E8D4A02BF9E30A000FD824 /* HealthReadApp.swift */; };
 		F3E8D4A32BF9E30A000FD824 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3E8D4A22BF9E30A000FD824 /* ContentView.swift */; };
 		F3E8D4A52BF9E30B000FD824 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F3E8D4A42BF9E30B000FD824 /* Assets.xcassets */; };
@@ -48,6 +50,11 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		EE00000200000004FFAA0014 /* Analytics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Analytics.swift; sourceTree = "<group>"; };
+		EE00000200000005FFAA0015 /* FrameQuality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameQuality.swift; sourceTree = "<group>"; };
+		EE00000200000003FFAA0013 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		EE00000200000002FFAA0012 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		EE00000200000001FFAA0011 /* ReadingEngines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReadingEngines.swift; sourceTree = "<group>"; };
 		AA00000200000001AABB0011 /* HealthReadingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReadingState.swift; sourceTree = "<group>"; };
 		AA00000200000002AABB0012 /* HealthReading.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReading.swift; sourceTree = "<group>"; };
 		AA00000200000004AABB0014 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
@@ -72,9 +79,6 @@
 		C3EF64602C135E220034EC11 /* mobileclip_s0_image.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = mobileclip_s0_image.mlpackage; sourceTree = "<group>"; };
 		C3EF64612C135E220034EC11 /* mobileclip_s0_text.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = mobileclip_s0_text.mlpackage; sourceTree = "<group>"; };
 		C3EF64692C135FC70034EC11 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		CC00000200000001DDEE0011 /* GeminiService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiService.swift; sourceTree = "<group>"; };
-		CC00000200000002DDEE0012 /* APIKeyProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeyProvider.swift; sourceTree = "<group>"; };
-		CC00000200000003DDEE0013 /* Secrets.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Secrets.plist; sourceTree = "<group>"; };
 		F3E8D49D2BF9E30A000FD824 /* HealthRead.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HealthRead.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F3E8D4A02BF9E30A000FD824 /* HealthReadApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReadApp.swift; sourceTree = "<group>"; };
 		F3E8D4A22BF9E30A000FD824 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -111,6 +115,8 @@
 				AA00000200000005AABB0015 /* ScanningView.swift */,
 				AA00000200000006AABB0016 /* ConfirmReadingView.swift */,
 				AA00000200000007AABB0017 /* SuccessView.swift */,
+				EE00000200000003FFAA0013 /* SettingsView.swift */,
+				EE00000200000002FFAA0012 /* OnboardingView.swift */,
 				AA00000200000008AABB0018 /* HistoryView.swift */,
 				BB00000200000001CCDD0011 /* CameraTab.swift */,
 				BB00000200000002CCDD0012 /* WeightHistoryTab.swift */,
@@ -171,10 +177,10 @@
 				F3E8D4E92BFC6174000FD824 /* ZSImageClassification.swift */,
 				AA00000200000001AABB0011 /* HealthReadingState.swift */,
 				AA00000200000002AABB0012 /* HealthReading.swift */,
-				CC00000200000001DDEE0011 /* GeminiService.swift */,
-				CC00000200000002DDEE0012 /* APIKeyProvider.swift */,
-				CC00000200000003DDEE0013 /* Secrets.plist */,
 				AA00000200000004AABB0014 /* HealthKitManager.swift */,
+				EE00000200000001FFAA0011 /* ReadingEngines.swift */,
+				EE00000200000004FFAA0014 /* Analytics.swift */,
+				EE00000200000005FFAA0015 /* FrameQuality.swift */,
 				AA00000200000009AABB0019 /* HealthRead.entitlements */,
 				F3E8D4A42BF9E30B000FD824 /* Assets.xcassets */,
 				F3E8D4A62BF9E30B000FD824 /* Preview Content */,
@@ -287,7 +293,6 @@
 				F3E8D4E32BFC5CEC000FD824 /* clip-merges.txt in Resources */,
 				F3E8D4A52BF9E30B000FD824 /* Assets.xcassets in Resources */,
 				C3CFD36E2C98DFFF00E992B5 /* Build.xcconfig in Resources */,
-				CC00000100000003DDEE0003 /* Secrets.plist in Resources */,
 				F3E8D4E22BFC5CEC000FD824 /* clip-vocab.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -321,12 +326,15 @@
 				C3EF646A2C135FC70034EC11 /* Models.swift in Sources */,
 				AA00000100000001AABB0001 /* HealthReadingState.swift in Sources */,
 				AA00000100000002AABB0002 /* HealthReading.swift in Sources */,
-				CC00000100000001DDEE0001 /* GeminiService.swift in Sources */,
-				CC00000100000002DDEE0002 /* APIKeyProvider.swift in Sources */,
 				AA00000100000004AABB0004 /* HealthKitManager.swift in Sources */,
 				AA00000100000005AABB0005 /* ScanningView.swift in Sources */,
 				AA00000100000006AABB0006 /* ConfirmReadingView.swift in Sources */,
 				AA00000100000007AABB0007 /* SuccessView.swift in Sources */,
+				EE00000100000004FFAA0004 /* Analytics.swift in Sources */,
+				EE00000100000005FFAA0005 /* FrameQuality.swift in Sources */,
+				EE00000100000003FFAA0003 /* SettingsView.swift in Sources */,
+				EE00000100000002FFAA0002 /* OnboardingView.swift in Sources */,
+				EE00000100000001FFAA0001 /* ReadingEngines.swift in Sources */,
 				AA00000100000008AABB0008 /* HistoryView.swift in Sources */,
 				BB00000100000001CCDD0001 /* CameraTab.swift in Sources */,
 				BB00000100000002CCDD0002 /* WeightHistoryTab.swift in Sources */,
@@ -469,11 +477,11 @@
 				DEVELOPMENT_TEAM = LJA3588388;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HealthRead/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HealthRead;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to read your blood pressure monitor or weight scale display";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "View your recent blood pressure and weight readings";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Save blood pressure and weight readings from your devices";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save captured images of your health device readings";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -506,11 +514,11 @@
 				DEVELOPMENT_TEAM = LJA3588388;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = HealthRead/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = HealthRead;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Camera is used to read your blood pressure monitor or weight scale display";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "View your recent blood pressure and weight readings";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Save blood pressure and weight readings from your devices";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Save captured images of your health device readings";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

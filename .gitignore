@@ -5,3 +5,13 @@ HealthRead/Models/mobileclip_s0_text.mlpackage/
 *.xcworkspace/xcuserdata
 
 HealthRead/Secrets.plist
+
+# Local build output
+build/
+__pycache__/
+.aws-sam/
+samconfig.toml
+HealthRead/Configuration/Local.xcconfig
+
+# Xcode per-user state at any depth (e.g. inside project.xcworkspace)
+xcuserdata/

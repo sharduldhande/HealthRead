@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  HealthRead reading service. One public HTTPS endpoint (Lambda Function URL) that reads
+  a photo of a blood pressure monitor or scale with Google's Gemini Decision 1, or with
+  Claude when Gemini is rate limited. The Gemini key is in Secrets Manager; Claude needs no
+  key (Workload Identity Federation with an AWS STS web identity token).
+  Spend is capped by low concurrency here and by the spend limit on the Anthropic workspace.
+
+Parameters:
+  Model:
+    Type: String
+    Default: gemini-decision-1
+    Description: Reader model ID (gemini-decision-1 or a Claude model ID).
+  FallbackModel:
+    Type: String
+    Default: claude-sonnet-5-5
+    Description: Claude model that reads the photo when Gemini answers 429 (rate limited).
+  GeminiSecretName:
+    Type: String
+    Default: healthread/gemini-api-key
+    Description: Secrets Manager secret holding the Gemini API key (the raw key string).
+  Effort:
+    Type: String
+    Default: low
+    AllowedValues: [low, medium, high]
+  AnthropicOrganizationId:
+    Type: String
+    Default: ""
+    Description: Claude Console organization ID (UUID). Not a secret; passed at deploy time.
+  AnthropicFederationRuleId:
+    Type: String
+    Default: ""
+    Description: ID of the federation rule that matches this function's AWS role.
+  AnthropicServiceAccountId:
+    Type: String
+    Default: ""
+    Description: Optional. Service account the rule targets.
+  AnthropicWorkspaceId:
+    Type: String
+    Default: ""
+    Description: Optional. wrkspc_ ID of the HealthRead workspace (needed if the rule covers several).
+  AppId:
+    Type: String
+    Default: LJA3588388.com.shardul.HealthRead
+    Description: App Attest app ID, "<Team ID>.<bundle ID>". Only this app's devices can attest.
+  AllowDevelopmentKeys:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Accept App Attest keys from development builds (Xcode installs). TestFlight uses production keys.
+  PerDeviceDailyLimit:
+    Type: Number
+    Default: 20
+    Description: Claude readings one device may make per day (UTC).
+  GlobalDailyLimit:
+    Type: Number
+    Default: 300
+    Description: Claude readings all devices together may make per day (UTC).
+  DevBypassToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional. Lets test scripts skip App Attest with an X-HealthRead-Dev-Token header. Empty = off.
+  PostHogApiKey:
+    Type: String
+    Default: ""
+    Description: PostHog project API key (write-only, public by design). Empty = no analytics.
+  PostHogHost:
+    Type: String
+    Default: https://eu.i.posthog.com
+  MaxConcurrency:
+    Type: Number
+    Default: 0
+    Description: >
+      Requests handled at once (extra ones get HTTP 429). 0 = no reservation. Reserving needs an
+      account concurrency limit above 10; new accounts start at 10, which already caps this function.
+
+Conditions:
+  ReserveConcurrency: !Not [!Equals [!Ref MaxConcurrency, 0]]
+
+Resources:
+  StateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: healthread-reading-service
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  ReadingFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: healthread-reading-service
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: anthropic-web-identity-token
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:GetWebIdentityToken
+                Resource: "*"
+        - PolicyName: gemini-api-key
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${GeminiSecretName}-*"
+        - PolicyName: state-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem]
+                Resource: !GetAtt StateTable.Arn
+
+  ReadingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: healthread-reading-service
+      CodeUri: .
+      Handler: app.handler
+      Runtime: python3.13
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 30
+      ReservedConcurrentExecutions: !If [ReserveConcurrency, !Ref MaxConcurrency, !Ref AWS::NoValue]
+      Role: !GetAtt ReadingFunctionRole.Arn
+      Environment:
+        Variables:
+          MODEL: !Ref Model
+          FALLBACK_MODEL: !Ref FallbackModel
+          GEMINI_SECRET_ID: !Ref GeminiSecretName
+          EFFORT: !Ref Effort
+          ANTHROPIC_ORGANIZATION_ID: !Ref AnthropicOrganizationId
+          ANTHROPIC_FEDERATION_RULE_ID: !Ref AnthropicFederationRuleId
+          ANTHROPIC_SERVICE_ACCOUNT_ID: !Ref AnthropicServiceAccountId
+          ANTHROPIC_WORKSPACE_ID: !Ref AnthropicWorkspaceId
+          TABLE_NAME: !Ref StateTable
+          APP_ID: !Ref AppId
+          ALLOW_DEVELOPMENT_KEYS: !Ref AllowDevelopmentKeys
+          PER_DEVICE_DAILY_LIMIT: !Ref PerDeviceDailyLimit
+          GLOBAL_DAILY_LIMIT: !Ref GlobalDailyLimit
+          DEV_BYPASS_TOKEN: !Ref DevBypassToken
+          POSTHOG_API_KEY: !Ref PostHogApiKey
+          POSTHOG_HOST: !Ref PostHogHost
+      FunctionUrlConfig:
+        AuthType: NONE
+      LoggingConfig:
+        LogFormat: Text
+
+  ReadingFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/healthread-reading-service
+      RetentionInDays: 14
+
+Outputs:
+  ServiceURL:
+    Description: Put this in ClaudeReader.serviceURL in the iOS app.
+    Value: !GetAtt ReadingFunctionUrl.FunctionUrl
+  RoleArn:
+    Description: The AWS identity the federation rule in the Claude Console should match.
+    Value: !GetAtt ReadingFunctionRole.Arn

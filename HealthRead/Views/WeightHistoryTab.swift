@@ -54,7 +54,7 @@ struct WeightHistoryTab: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Weight")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     if !readings.isEmpty {
                         EditButton()
                     }
@@ -132,7 +132,7 @@ struct WeightHistoryTab: View {
             Text("No Weight Readings")
                 .font(.title3)
                 .fontWeight(.semibold)
-            Text("Use the Camera tab to scan\nyour weight scale.")
+            Text("Use the Scan tab to read\nyour weight scale.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

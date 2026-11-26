@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var camera = CameraController()
     @State private var healthKit = HealthKitManager()
     @State private var selectedTab = 0
+    @AppStorage(ReadingMode.chosenKey) private var didChooseReadingMode = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -35,9 +36,21 @@ struct ContentView: View {
                 }
                 .tag(2)
         }
+        // Ask for camera and Apple Health access only after onboarding, so the
+        // system prompts come with context.
         .task {
+            Analytics.capture("app_opened", ["onboarded": didChooseReadingMode])
+        }
+        .task(id: didChooseReadingMode) {
+            guard didChooseReadingMode else { return }
             camera.start()
-            await healthKit.requestAuthorization()
+            // Let the onboarding cover finish closing first: iOS can't show the Health
+            // permission sheet mid-dismissal, and the request then never returns.
+            try? await Task.sleep(for: .seconds(1))
+            _ = await healthKit.requestAuthorization()
+        }
+        .fullScreenCover(isPresented: .constant(!didChooseReadingMode)) {
+            OnboardingView()
         }
     }
 }

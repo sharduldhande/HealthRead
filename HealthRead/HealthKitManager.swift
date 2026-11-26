@@ -55,23 +55,55 @@ class HealthKitManager {
 
     // MARK: - Save
 
-    /// Save a blood pressure reading (HealthKit or local)
-    func saveBloodPressure(_ reading: BloodPressureReading) async throws {
-        if isHealthKitAvailable, let healthStore {
-            try await saveBloodPressureToHealthKit(reading, store: healthStore)
+    /// Where a saved reading ended up, so the UI never claims Apple Health when it wasn't used.
+    enum SaveDestination {
+        case appleHealth
+        case thisDeviceOnly
+    }
+
+    /// Decides from HealthKit's own record of the person's answer, not from whether an
+    /// earlier request returned: a request that never came back used to hang every save.
+    private func healthStoreForWriting(_ type: HKQuantityType) async -> HKHealthStore? {
+        guard let healthStore else { return nil }
+        switch healthStore.authorizationStatus(for: type) {
+        case .sharingAuthorized, .sharingDenied:
+            // Denied still returns the store: the write then fails with a clear
+            // "Health access is off" error instead of a silent app-only save.
+            isHealthKitAvailable = true
+            return healthStore
+        case .notDetermined:
+            return await requestAuthorization() ? healthStore : nil
+        @unknown default:
+            return await requestAuthorization() ? healthStore : nil
+        }
+    }
+
+    /// Save a blood pressure reading. Throws if Apple Health refuses the write
+    /// (for example, access was turned off), so the user sees an error instead of a false success.
+    @discardableResult
+    func saveBloodPressure(_ reading: BloodPressureReading) async throws -> SaveDestination {
+        var destination = SaveDestination.thisDeviceOnly
+        if let store = await healthStoreForWriting(HKQuantityType(.bloodPressureSystolic)) {
+            try await saveBloodPressureToHealthKit(reading, store: store)
+            destination = .appleHealth
         }
         // Always save locally too (as backup / for history view)
         localBPReadings.insert(reading, at: 0)
         saveLocalReadings()
+        return destination
     }
 
-    /// Save a weight reading (HealthKit or local)
-    func saveWeight(_ reading: WeightReading) async throws {
-        if isHealthKitAvailable, let healthStore {
-            try await saveWeightToHealthKit(reading, store: healthStore)
+    /// Save a weight reading. See `saveBloodPressure` for the error behavior.
+    @discardableResult
+    func saveWeight(_ reading: WeightReading) async throws -> SaveDestination {
+        var destination = SaveDestination.thisDeviceOnly
+        if let store = await healthStoreForWriting(HKQuantityType(.bodyMass)) {
+            try await saveWeightToHealthKit(reading, store: store)
+            destination = .appleHealth
         }
         localWeightReadings.insert(reading, at: 0)
         saveLocalReadings()
+        return destination
     }
 
     // MARK: - Delete
