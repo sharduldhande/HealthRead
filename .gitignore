@@ -12,3 +12,6 @@ __pycache__/
 .aws-sam/
 samconfig.toml
 HealthRead/Configuration/Local.xcconfig
+
+# Xcode per-user state at any depth (e.g. inside project.xcworkspace)
+xcuserdata/
